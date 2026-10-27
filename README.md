@@ -60,6 +60,77 @@ click-spirit/
 
 `button` 只能是 `left`、`right` 或 `middle`。座標必須大於等於 0。
 
+沒有 `target` 的舊腳本仍是定點：點步驟的 `x, y`。新欄位都可省略，省略時行為與舊版相同。
+
+### 步驟重複、圓形與找圖
+
+腳本的 `repeat` 仍是整份腳本的迴圈次數，`0` 代表無限。步驟自己的 `repeat` 是這一筆要連續做幾次，`0` 或 `1` 都是一次。`interval_ms` 加在每一次重複之後；`0` 仍改用 `default_interval_ms`。
+
+`target.kind`：
+
+| kind | 行為 |
+| --- | --- |
+| 省略或 `point` | 點步驟的 `x, y` |
+| `circle` | 在圓盤 `(cx, cy, r)` 內均勻抽一個整數像素。極角 `2πu1`，半徑 `R*sqrt(u2)`，四捨五入後小於 0 的座標會夾到 0 |
+| `image` | 在截圖裡做灰階零均值正規化互相關（ZNCC），點在命中框的中心再加上 `offset_x`、`offset_y` |
+
+找圖欄位：`template`（PNG 路徑）或 `template_b64`（可含 data URL）。`threshold` 省略或 `0` 時是 `0.9`，範圍 `0..1`。`region` 是 `{x,y,w,h}`，省略或寬高不大於 0 就搜全圖。`on_not_found` 是 `skip`（預設，不點但仍等間隔）、`wait`（在 `timeout_ms` 內每 `poll_ms` 再截一次，逾時失敗；`poll_ms` 省略是 100）或 `stop`（立刻失敗）。沒有注入截圖來源時，找圖步驟會失敗並說明缺少 capturer。
+
+```json
+{
+  "version": 1,
+  "name": "進階示範",
+  "emergency_hotkey": "F12",
+  "repeat": 1,
+  "default_interval_ms": 100,
+  "steps": [
+    {"x": 10, "y": 20, "button": "left", "clicks": 1, "interval_ms": 50, "repeat": 2},
+    {
+      "x": 0, "y": 0, "button": "left", "clicks": 1, "interval_ms": 80,
+      "target": {"kind": "circle", "cx": 400, "cy": 300, "r": 40}
+    },
+    {
+      "x": 0, "y": 0, "button": "left", "clicks": 1,
+      "target": {
+        "kind": "image",
+        "template": "btn.png",
+        "threshold": 0.9,
+        "offset_x": 0,
+        "offset_y": 0,
+        "on_not_found": "wait",
+        "timeout_ms": 3000,
+        "poll_ms": 200,
+        "region": {"x": 0, "y": 0, "w": 800, "h": 600}
+      }
+    }
+  ]
+}
+```
+
+`emergency_hotkey` 是緊急停止和弦，例如 `F12` 或 `Ctrl+Shift+Esc`。大小寫不拘，修飾鍵可為 Ctrl、Shift、Alt、Super（也接受 Win、Meta、Cmd）。引擎有熱鍵後端時，開始執行會武裝它；觸發後立刻停止，並送出 `emergency_stop`。空字串不改目前的熱鍵。Android 沒有全域熱鍵，介面按鈕呼叫 `EmergencyStop`。
+
+執行中的 `step` 事件帶步驟索引與第幾次重複（0 起算）。重複超過一次時，訊息會加上 `#1`、`#2`。
+
+### 找圖演算法與限制
+
+`core/imagematch` 是純 Go，沒有 OpenCV、也沒有 cgo。影像先轉成灰階（Rec.601），再用積分圖算零均值正規化互相關。分數在 -1 到 1。模板沒有對比時會失敗。畫面夠大時會先做 2 倍縮小的粗搜，再在附近細搜；粗搜分數太低或細搜明顯變差時改回全圖掃描。`FindAll` 用門檻加非最大抑制。
+
+不支援縮放與旋轉。模板要與畫面上的圖一樣大、一樣正。亮度小幅變化與輕微雜訊仍可命中，因為 ZNCC 對亮度平移與縮放不敏感。
+
+### 錄製與回放
+
+`core/record` 收時間戳事件（move、down、up、click）。平台的全域滑鼠鉤子還沒接上，`platform.NewInputSource` 會回傳尚未實作；測試與程式可以用 `Recorder.Add`，或讓引擎的 `StartRecordingWith` 吃一個假的 `InputSource`。
+
+轉換規則：移動略過。同一鍵的 down 加 up 合成一次點擊，`hold_ms` 是按住的時間，座標用按下的位置。連續點擊若同鍵、起點間隔在雙擊窗內（預設 300 毫秒，負值關閉）、位移在容許範圍（預設 3 像素），會併成 `clicks` 2 或 3。步驟間隔是這次放開到下次按下，再除以速度（`<=0` 當 1），然後不低於最短間隔。雙擊內部的空隙不會保留。回放就是把產生的腳本交給 `Runner`。FFI 的 `CS_StartRecording` 在鉤子未實作時回傳 `{"error":...}`；`CS_StopRecording` 成功時回傳腳本 JSON。
+
+### 緊急停止的平台實作
+
+- Linux（cgo 且沒有 `-tags nox11`）：另一條 Display 連線上 `XGrabKey`，事件迴圈在自己的 goroutine。Caps Lock 與 Num Lock 的組合會一併抓住。
+- Windows：`RegisterHotKey` 加鎖定 OS 執行緒的訊息迴圈。
+- macOS：尚未實作。需要 `CGEventTap` 與輔助使用權限。
+- Android：沒有全域熱鍵。`mobile.EmergencyStop` 給懸浮按鈕用。
+- `CGO_ENABLED=0` 或 `-tags nox11` 的 Linux 建置不含 X11 熱鍵。
+
 指令列：
 
 ```bash
@@ -68,7 +139,10 @@ go run ./cmd/clicker validate sample.json
 go run ./cmd/clicker run -dry-run sample.json
 go run ./cmd/clicker run sample.json    # 需要桌面後端（Windows、macOS，或 Linux 的 X11 / uinput）
 go run ./cmd/clicker pos                # 印出游標；uinput 不支援，會失敗
+go run ./cmd/clicker match -threshold 0.9 btn.png screen.png
 ```
+
+`run` 在非 dry-run 且腳本有 `emergency_hotkey` 時會武裝該熱鍵。`match` 在兩張 PNG 上找圖並印 JSON，找到且沒有錯誤時結束碼為 0。
 
 Windows 執行檔：
 
@@ -217,10 +291,11 @@ AAR 輸出到 `app/android/app/libs/clickspirit.aar`。Java 套件是 `com.click
 還沒有定案的部分：
 
 - 桌面事件要繼續用 FFI 輪詢 `CS_PollEvent`，還是改成 `NativeCallable` 由 Go 直接回呼 Dart。
-- 全域快捷鍵要用 Flutter 的 `hotkey_manager`，還是在 Go 端用 Windows `RegisterHotKey` 與 macOS `CGEventTap`。
-- Android 座標擷取要用懸浮窗，還是用 MediaProjection 截圖後讓使用者點選。
+- macOS 全域熱鍵仍缺 `CGEventTap`（需要輔助使用權限）。Linux X11 用 `XGrabKey`，Windows 用 `RegisterHotKey`，Android 用 `EmergencyStop`。
+- Android 座標擷取要用懸浮窗，還是用 MediaProjection 截圖後讓使用者點選。找圖本體已可吃 Kotlin 傳來的 PNG。
 - DPI 與多螢幕的座標縮放還沒有完整規格。腳本目前要求 X、Y 大於等於 0，虛擬桌面原點為負的螢幕會點不到。
 - 程式碼簽章與公證的發佈流程（macOS notarize、Windows 簽章）還沒有自動化。
-- 截圖與找圖點擊：Linux X11 已能截全螢幕（`CS_CaptureScreenPNG`）。Windows、macOS、Android 的 `core.ScreenCapturer` 仍未實作。依圖點擊還沒有做。
+- 截圖：Linux X11 已能截全螢幕（`CS_CaptureScreenPNG`）。Windows、macOS、Android 的 `core.ScreenCapturer` 仍未實作。找圖演算法在 `core/imagematch`，有截圖就能跑。不支援縮放與旋轉。
+- 錄製的平台鉤子（滑鼠全域監聽）還沒做。事件轉腳本與回放已可用。
 - Wayland 下的座標與截圖：uinput 只能送出絕對座標，讀不到游標，也不能截圖。之後可走 xdg-desktop-portal 的 RemoteDesktop（輸入）與 ScreenCast（截圖）。
 - uinput 絕對座標與多螢幕：裝置範圍來自 `CLICK_SPIRIT_SCREEN` 或 `NewUinput`，尚未對應多螢幕原點與縮放。

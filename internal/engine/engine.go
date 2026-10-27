@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/click-spirit/click-spirit/core"
+	"github.com/click-spirit/click-spirit/core/record"
 )
 
 // ErrCaptureUnsupported is returned when the clicker cannot capture the screen.
@@ -31,6 +32,16 @@ type Engine struct {
 	queue    []string
 	maxQueue int
 	hook     func(core.Event)
+
+	capturer   core.ScreenCapturer
+	hotkeyMu   sync.Mutex
+	newHotkey  func(name string) (core.HotkeySource, error)
+	hotkey     core.HotkeySource
+	hotkeyName string
+
+	newInput func() (record.InputSource, error)
+	rec      *record.Recorder
+	recOpt   record.Options
 }
 
 // New returns an engine. initErr is returned by Start when clicker is nil,
@@ -60,6 +71,16 @@ func (e *Engine) Start(jsonStr string) error {
 	if err := script.Validate(); err != nil {
 		return err
 	}
+	if script.EmergencyHotkey != "" {
+		e.mu.Lock()
+		arm := e.newHotkey != nil
+		e.mu.Unlock()
+		if arm {
+			if err := e.SetHotkey(script.EmergencyHotkey); err != nil {
+				return err
+			}
+		}
+	}
 
 	e.mu.Lock()
 	if e.clicker == nil {
@@ -76,9 +97,10 @@ func (e *Engine) Start(jsonStr string) error {
 	}
 	e.starting = true
 	r := &core.Runner{
-		Clicker: e.clicker,
-		Sleep:   e.Sleep,
-		OnEvent: e.onRunnerEvent,
+		Clicker:  e.clicker,
+		Sleep:    e.Sleep,
+		OnEvent:  e.onRunnerEvent,
+		Capturer: e.capturerLocked(),
 	}
 	e.runner = r
 	e.mu.Unlock()
@@ -137,23 +159,36 @@ func (e *Engine) PollEvent() (string, bool) {
 	return s, true
 }
 
-// Capture returns a screenshot when the clicker implements core.ScreenCapturer.
+// Capture returns a screenshot. An injected capturer is preferred. Otherwise
+// the clicker is used when it implements core.ScreenCapturer.
 func (e *Engine) Capture() (image.Image, error) {
 	e.mu.Lock()
-	c := e.clicker
+	c := e.capturerLocked()
 	initErr := e.initErr
+	hasClicker := e.clicker != nil
 	e.mu.Unlock()
-	if c == nil {
+	if c != nil {
+		return c.Capture()
+	}
+	if !hasClicker {
 		if initErr != nil {
 			return nil, initErr
 		}
 		return nil, errors.New("no clicker")
 	}
-	s, ok := c.(core.ScreenCapturer)
-	if !ok || s == nil {
-		return nil, ErrCaptureUnsupported
+	return nil, ErrCaptureUnsupported
+}
+
+// capturerLocked prefers an injected capturer, then the clicker itself.
+// The caller holds e.mu.
+func (e *Engine) capturerLocked() core.ScreenCapturer {
+	if e.capturer != nil {
+		return e.capturer
 	}
-	return s.Capture()
+	if s, ok := e.clicker.(core.ScreenCapturer); ok {
+		return s
+	}
+	return nil
 }
 
 // CursorPos reads the pointer when the clicker implements core.CursorLocator.
@@ -201,26 +236,28 @@ func (e *Engine) pushLocked(s string) {
 }
 
 type eventPayload struct {
-	Kind    string `json:"kind"`
-	Loop    int    `json:"loop"`
-	Step    int    `json:"step"`
-	Message string `json:"message"`
-	X       int    `json:"x"`
-	Y       int    `json:"y"`
-	Button  string `json:"button"`
-	Clicks  int    `json:"clicks"`
+	Kind       string `json:"kind"`
+	Loop       int    `json:"loop"`
+	Step       int    `json:"step"`
+	Repetition int    `json:"repetition"`
+	Message    string `json:"message"`
+	X          int    `json:"x"`
+	Y          int    `json:"y"`
+	Button     string `json:"button"`
+	Clicks     int    `json:"clicks"`
 }
 
 func payloadOf(ev core.Event) eventPayload {
 	p := eventPayload{
-		Kind:    string(ev.Kind),
-		Loop:    ev.Loop,
-		Step:    ev.StepIndex,
-		Message: Message(ev),
-		X:       ev.Step.X,
-		Y:       ev.Step.Y,
-		Button:  string(ev.Step.Button),
-		Clicks:  ev.Step.Clicks,
+		Kind:       string(ev.Kind),
+		Loop:       ev.Loop,
+		Step:       ev.StepIndex,
+		Repetition: ev.Repetition,
+		Message:    Message(ev),
+		X:          ev.Step.X,
+		Y:          ev.Step.Y,
+		Button:     string(ev.Step.Button),
+		Clicks:     ev.Step.Clicks,
 	}
 	if ev.Kind == core.EventStep {
 		p.Clicks = ev.Step.EffectiveClicks()
@@ -234,13 +271,15 @@ func Message(ev core.Event) string {
 	case core.EventStarted:
 		return "開始執行"
 	case core.EventStep:
-		return sprintfStep(ev.Step)
+		return sprintfStep(ev.Step, ev.Repetition)
 	case core.EventLoopDone:
 		return sprintfLoop(ev.Loop)
 	case core.EventFinished:
 		return "執行完成"
 	case core.EventStopped:
 		return "已停止"
+	case core.EventEmergencyStop:
+		return "緊急停止"
 	case core.EventError:
 		if ev.Err != nil {
 			return ev.Err.Error()

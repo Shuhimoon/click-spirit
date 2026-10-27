@@ -1,14 +1,22 @@
 package mobile
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"math"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/click-spirit/click-spirit/core"
+	"github.com/click-spirit/click-spirit/core/imagematch"
 	"github.com/click-spirit/click-spirit/internal/engine"
 )
 
@@ -200,8 +208,213 @@ func mustJSON(t *testing.T, s *core.Script) string {
 func TestStopWithoutEngine(t *testing.T) {
 	reset(t)
 	Stop()
+	EmergencyStop()
 	if IsRunning() {
 		t.Fatal("running")
 	}
 	_ = time.Millisecond
+}
+
+func TestStepRepeatAndCircle(t *testing.T) {
+	reset(t)
+	f := &fakeDisp{ok: true}
+	l := &fakeListener{}
+	SetDispatcher(f)
+	SetListener(l)
+	mu.Lock()
+	e, err := ensureLocked()
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Sleep = func(ctx context.Context, d time.Duration) error {
+		return ctx.Err()
+	}
+	raw := mustJSON(t, &core.Script{
+		Version: 1,
+		Repeat:  2,
+		Steps: []core.Step{
+			{X: 1, Y: 1, Button: core.ButtonLeft, Repeat: 2},
+			{X: 2, Y: 2, Button: core.ButtonLeft, Repeat: 3},
+			{X: 3, Y: 3, Button: core.ButtonLeft},
+			{Button: core.ButtonLeft, Repeat: 20, Target: &core.Target{Kind: core.TargetCircle, CX: 100, CY: 80, R: 40}},
+		},
+	})
+	if err := StartScript(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	got := append([]tap(nil), f.taps...)
+	f.mu.Unlock()
+	ordered := []tap{
+		{1, 1, 0, 1}, {1, 1, 0, 1},
+		{2, 2, 0, 1}, {2, 2, 0, 1}, {2, 2, 0, 1},
+		{3, 3, 0, 1},
+	}
+	const circleN = 20
+	perLoop := len(ordered) + circleN
+	if len(got) != perLoop*2 {
+		t.Fatalf("taps %d, want %d", len(got), perLoop*2)
+	}
+	var distinct bool
+	var first *tap
+	for loop := 0; loop < 2; loop++ {
+		base := loop * perLoop
+		for i, want := range ordered {
+			if got[base+i] != want {
+				t.Fatalf("loop %d tap[%d] = %#v want %#v", loop, i, got[base+i], want)
+			}
+		}
+		for _, tp := range got[base+len(ordered) : base+perLoop] {
+			if math.Hypot(float64(tp.x-100), float64(tp.y-80)) > 40.75 {
+				t.Fatalf("outside disc %#v", tp)
+			}
+			if first == nil {
+				cp := tp
+				first = &cp
+			} else if tp != *first {
+				distinct = true
+			}
+		}
+	}
+	if !distinct {
+		t.Fatal("circle samples were identical")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	joined := strings.Join(l.msgs, "\n")
+	if !strings.Contains(joined, "#1") || !strings.Contains(joined, "#2") {
+		t.Fatalf("messages %v", l.msgs)
+	}
+}
+
+func TestEmergencyStop(t *testing.T) {
+	reset(t)
+	f := &fakeDisp{ok: true}
+	l := &fakeListener{}
+	SetDispatcher(f)
+	SetListener(l)
+	mu.Lock()
+	e, err := ensureLocked()
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	e.Sleep = func(ctx context.Context, d time.Duration) error {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	raw := mustJSON(t, &core.Script{
+		Version: 1,
+		Repeat:  0,
+		Steps:   []core.Step{{X: 1, Y: 1, Button: core.ButtonLeft, IntervalMs: 60_000}},
+	})
+	if err := StartScript(raw); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("script did not reach the interval")
+	}
+	EmergencyStop()
+	if err := e.Wait(); !errors.Is(err, core.ErrStopped) {
+		t.Fatal(err)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !strings.Contains(strings.Join(l.kinds, ","), "emergency_stop") {
+		t.Fatalf("kinds %v", l.kinds)
+	}
+	if !strings.Contains(strings.Join(l.msgs, "\n"), "緊急停止") {
+		t.Fatalf("messages %v", l.msgs)
+	}
+}
+
+func TestMatchImageBytes(t *testing.T) {
+	reset(t)
+	rng := rand.New(rand.NewPCG(3, 4))
+	screen := image.NewRGBA(image.Rect(0, 0, 48, 36))
+	for y := 0; y < 36; y++ {
+		for x := 0; x < 48; x++ {
+			v := uint8(rng.IntN(200))
+			screen.SetRGBA(x, y, color.RGBA{R: v, G: v, B: v, A: 255})
+		}
+	}
+	templ := plusImage(7)
+	const px, py = 11, 8
+	for y := 0; y < 7; y++ {
+		for x := 0; x < 7; x++ {
+			screen.SetRGBA(px+x, py+y, templ.RGBAAt(x, y))
+		}
+	}
+	raw := MatchImage(pngBytes(t, screen), pngBytes(t, templ), 0.9)
+	var hit imagematch.Hit
+	if err := json.Unmarshal([]byte(raw), &hit); err != nil {
+		t.Fatal(err, raw)
+	}
+	if !hit.Found || hit.Error != "" || hit.X != px+7/2 || hit.Y != py+7/2 || hit.Score < 0.99 {
+		t.Fatalf("%+v", hit)
+	}
+
+	other := checkerImage(7)
+	miss := MatchImage(pngBytes(t, screen), pngBytes(t, other), 0)
+	hit = imagematch.Hit{}
+	if err := json.Unmarshal([]byte(miss), &hit); err != nil {
+		t.Fatal(err, miss)
+	}
+	if hit.Found || hit.Score >= 0.9 {
+		t.Fatalf("absent %+v", hit)
+	}
+	bad := MatchImage([]byte("nope"), pngBytes(t, templ), 0.9)
+	if !strings.Contains(bad, `"found":false`) || !strings.Contains(bad, "error") {
+		t.Fatal(bad)
+	}
+}
+
+func pngBytes(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func plusImage(n int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, n, n))
+	mid := n / 2
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			if x == mid || y == mid {
+				img.SetRGBA(x, y, color.RGBA{R: 255, A: 255})
+			} else {
+				img.SetRGBA(x, y, color.RGBA{A: 255})
+			}
+		}
+	}
+	return img
+}
+
+func checkerImage(n int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, n, n))
+	for y := 0; y < n; y++ {
+		for x := 0; x < n; x++ {
+			if (x+y)%2 == 0 {
+				img.SetRGBA(x, y, color.RGBA{G: 255, A: 255})
+			} else {
+				img.SetRGBA(x, y, color.RGBA{B: 255, A: 255})
+			}
+		}
+	}
+	return img
 }

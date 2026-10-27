@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -19,22 +20,32 @@ var ErrAlreadyRunning = errors.New("already running")
 type EventKind string
 
 const (
-	EventStarted  EventKind = "started"
-	EventStep     EventKind = "step"
-	EventLoopDone EventKind = "loopDone"
-	EventFinished EventKind = "finished"
-	EventStopped  EventKind = "stopped"
-	EventError    EventKind = "error"
+	EventStarted       EventKind = "started"
+	EventStep          EventKind = "step"
+	EventLoopDone      EventKind = "loopDone"
+	EventFinished      EventKind = "finished"
+	EventStopped       EventKind = "stopped"
+	EventError         EventKind = "error"
+	EventEmergencyStop EventKind = "emergency_stop"
 )
+
+// ErrNoCapturer is returned when an image step runs without a ScreenCapturer.
+var ErrNoCapturer = errors.New("image step requires a screen capturer")
+
+// ErrImageNotFound is returned when an image step misses and the step is set
+// to stop, or when a wait times out.
+var ErrImageNotFound = errors.New("image template not found")
 
 // Event is one progress notification.
 // StepIndex is -1 when the event is not tied to a step.
+// Repetition is the zero-based index inside a step's repeat count.
 type Event struct {
-	Kind      EventKind
-	Loop      int
-	StepIndex int
-	Step      Step
-	Err       error
+	Kind       EventKind
+	Loop       int
+	StepIndex  int
+	Repetition int
+	Step       Step
+	Err        error
 }
 
 // Clicker performs pointer actions.
@@ -49,9 +60,12 @@ type CursorLocator interface {
 }
 
 type flight struct {
-	clicker Clicker
-	sleep   func(context.Context, time.Duration) error
-	onEvent func(Event)
+	clicker  Clicker
+	capturer ScreenCapturer
+	sleep    func(context.Context, time.Duration) error
+	onEvent  func(Event)
+	rand     func() float64
+	now      func() time.Time
 }
 
 type runState struct {
@@ -63,12 +77,20 @@ type runState struct {
 //
 // Set Clicker, Sleep, and OnEvent before Start or Run. Sleep defaults to a
 // context-aware timer. Per-step IntervalMs of 0 uses Script.DefaultIntervalMs.
-// The delay is applied after each click. LoopIntervalMs is applied between
-// loops, not after the final loop. Repeat of 0 loops until Stop or cancel.
+// The delay is applied after each repetition of a step. LoopIntervalMs is
+// applied between loops, not after the final loop. Script Repeat of 0 loops
+// until Stop or cancel. Step Repeat of 0 or 1 runs that step once.
+//
+// Rand draws circle targets. Nil uses the global math/rand/v2 generator.
+// Capturer is required for image targets. Now is the clock for image-wait
+// timeouts. Nil uses time.Now. These fields are copied when a run begins.
 type Runner struct {
-	Clicker Clicker
-	Sleep   func(ctx context.Context, d time.Duration) error
-	OnEvent func(Event)
+	Clicker  Clicker
+	Sleep    func(ctx context.Context, d time.Duration) error
+	OnEvent  func(Event)
+	Rand     func() float64
+	Capturer ScreenCapturer
+	Now      func() time.Time
 
 	mu      sync.Mutex
 	running bool
@@ -164,9 +186,22 @@ func (r *Runner) begin(cancel context.CancelFunc) (flight, error) {
 	if r.Clicker == nil {
 		return flight{}, errors.New("nil clicker")
 	}
-	f := flight{clicker: r.Clicker, sleep: r.Sleep, onEvent: r.OnEvent}
+	f := flight{
+		clicker:  r.Clicker,
+		capturer: r.Capturer,
+		sleep:    r.Sleep,
+		onEvent:  r.OnEvent,
+		rand:     r.Rand,
+		now:      r.Now,
+	}
 	if f.sleep == nil {
 		f.sleep = defaultSleep
+	}
+	if f.rand == nil {
+		f.rand = rand.Float64
+	}
+	if f.now == nil {
+		f.now = time.Now
 	}
 	r.running = true
 	r.cancel = cancel
@@ -196,6 +231,11 @@ func normalizeScript(script *Script) (*Script, error) {
 }
 
 func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
+	templates, err := prepareTemplates(s.Steps)
+	if err != nil {
+		f.emit(Event{Kind: EventError, Loop: 0, StepIndex: -1, Err: err})
+		return err
+	}
 	f.emit(Event{Kind: EventStarted, Loop: 0, StepIndex: -1})
 	if err := f.wait(ctx, s.StartDelayMs); err != nil {
 		return f.endWait(ctx, err, 0, -1, Step{})
@@ -205,20 +245,38 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 			return f.halt(ctx, loop)
 		}
 		for i, step := range s.Steps {
-			if err := ctx.Err(); err != nil {
-				return f.halt(ctx, loop)
-			}
-			f.emit(Event{Kind: EventStep, Loop: loop, StepIndex: i, Step: step})
-			if err := f.clicker.MoveTo(step.X, step.Y); err != nil {
-				f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Step: step, Err: err})
-				return err
-			}
-			if err := f.clicker.Click(step.Button, step.EffectiveClicks(), step.HoldMs); err != nil {
-				f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Step: step, Err: err})
-				return err
-			}
-			if err := f.wait(ctx, step.EffectiveIntervalMs(s.DefaultIntervalMs)); err != nil {
-				return f.endWait(ctx, err, loop, i, step)
+			reps := step.EffectiveRepeat()
+			for rep := 0; rep < reps; rep++ {
+				if err := ctx.Err(); err != nil {
+					return f.halt(ctx, loop)
+				}
+				x, y, skip, locErr := f.locate(ctx, step, templates[i])
+				if locErr != nil {
+					if isContextErr(locErr) {
+						return f.endWait(ctx, locErr, loop, i, step)
+					}
+					wrapped := fmt.Errorf("step %d: %w", i, locErr)
+					f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Repetition: rep, Step: step, Err: wrapped})
+					return wrapped
+				}
+				shown := step
+				if !skip {
+					shown.X, shown.Y = x, y
+				}
+				f.emit(Event{Kind: EventStep, Loop: loop, StepIndex: i, Repetition: rep, Step: shown})
+				if !skip {
+					if err := f.clicker.MoveTo(x, y); err != nil {
+						f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Repetition: rep, Step: shown, Err: err})
+						return err
+					}
+					if err := f.clicker.Click(step.Button, step.EffectiveClicks(), step.HoldMs); err != nil {
+						f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Repetition: rep, Step: shown, Err: err})
+						return err
+					}
+				}
+				if err := f.wait(ctx, step.EffectiveIntervalMs(s.DefaultIntervalMs)); err != nil {
+					return f.endWait(ctx, err, loop, i, step)
+				}
 			}
 		}
 		f.emit(Event{Kind: EventLoopDone, Loop: loop, StepIndex: -1})
@@ -230,6 +288,10 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 	}
 	f.emit(Event{Kind: EventFinished, Loop: 0, StepIndex: -1})
 	return nil
+}
+
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (f flight) emit(ev Event) {

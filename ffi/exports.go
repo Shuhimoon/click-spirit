@@ -8,6 +8,7 @@ package main
 import "C"
 
 import (
+	"encoding/json"
 	"image/png"
 	"os"
 	"sync"
@@ -30,6 +31,8 @@ func shared() *engine.Engine {
 	engineOnce.Do(func() {
 		c, err := platform.New()
 		sharedEng = engine.New(c, err)
+		sharedEng.SetHotkeyFactory(platform.NewHotkey)
+		sharedEng.SetInputFactory(platform.NewInputSource)
 	})
 	return sharedEng
 }
@@ -152,6 +155,51 @@ func CS_CaptureScreenPNG(path *C.char) *C.char {
 		return cString(closeErr.Error())
 	}
 	return cString("")
+}
+
+//export CS_EmergencyStop
+func CS_EmergencyStop() {
+	shared().EmergencyStop()
+}
+
+//export CS_SetHotkey
+func CS_SetHotkey(name *C.char) *C.char {
+	if err := shared().SetHotkey(goString(name)); err != nil {
+		return cString(err.Error())
+	}
+	return cString("")
+}
+
+//export CS_StartRecording
+func CS_StartRecording() *C.char {
+	if err := shared().StartRecording(); err != nil {
+		return cString(jsonErr(err))
+	}
+	return cString(`{"ok":true}`)
+}
+
+//export CS_StopRecording
+func CS_StopRecording() *C.char {
+	s, err := shared().StopRecording()
+	if err != nil {
+		return cString(jsonErr(err))
+	}
+	return cString(s)
+}
+
+//export CS_MatchImage
+func CS_MatchImage(templatePath *C.char, threshold C.double) *C.char {
+	return cString(shared().MatchImage(goString(templatePath), float64(threshold)))
+}
+
+func jsonErr(err error) string {
+	b, mErr := json.Marshal(struct {
+		Error string `json:"error"`
+	}{Error: err.Error()})
+	if mErr != nil {
+		return `{"error":"unknown"}`
+	}
+	return string(b)
 }
 
 //export CS_FreeString

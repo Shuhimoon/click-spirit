@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/click-spirit/click-spirit/core"
+	"github.com/click-spirit/click-spirit/core/imagematch"
 	"github.com/click-spirit/click-spirit/internal/engine"
 )
 
@@ -80,6 +81,25 @@ func StartScript(jsonStr string) error {
 		return err
 	}
 	return e.Start(jsonStr)
+}
+
+// EmergencyStop emits an emergency_stop event and ends the active script.
+// Android has no global hotkey; the overlay button calls this.
+func EmergencyStop() {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	if e != nil {
+		e.EmergencyStop()
+	}
+}
+
+// MatchImage searches screenPNG for templatePNG. Both arguments are PNG bytes
+// supplied by Kotlin (the screen comes from MediaProjection). threshold <= 0
+// uses 0.9. The result is JSON {"found","x","y","score","error"}. x and y are
+// the center of the match when found.
+func MatchImage(screenPNG, templatePNG []byte, threshold float64) string {
+	return imagematch.MatchPNG(screenPNG, templatePNG, threshold).JSON()
 }
 
 // Stop ends the active script.
