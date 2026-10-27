@@ -1,0 +1,226 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.47.8"
+
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install X11 headers
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev pkg-config
+      - name: gofmt, vet, test
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+      - name: cross compile
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=windows GOARCH=386 go vet ./platform/
+          GOOS=darwin CGO_ENABLED=0 go build ./...
+          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./core ./mobile
+          CGO_ENABLED=0 go build ./...
+          go build -tags nox11 ./...
+
+  flutter-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: analyze and test
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libgtk-3-dev ninja-build clang cmake pkg-config
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+      - name: Flutter scaffolding
+        run: bash scripts/flutter-scaffold.sh
+      - name: Build libclick_spirit.so
+        run: bash scripts/build-desktop-lib.sh linux
+      - name: Flutter build linux
+        working-directory: app
+        run: flutter build linux --release --no-tree-shake-icons
+      - name: Package bundle
+        run: tar -C app/build/linux/x64/release -czf click-spirit-linux-x64.tar.gz bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-app
+          path: click-spirit-linux-x64.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Install MinGW
+        run: choco install mingw -y
+      - name: Flutter scaffolding
+        shell: bash
+        run: bash scripts/flutter-scaffold.sh
+      - name: Build click_spirit.dll
+        shell: bash
+        run: |
+          if [ -d /c/ProgramData/mingw64/mingw64/bin ]; then
+            export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
+          fi
+          CC=gcc bash scripts/build-desktop-lib.sh windows
+      - name: Flutter build windows
+        working-directory: app
+        run: flutter build windows --release --no-tree-shake-icons
+      - name: Copy DLL next to the exe and zip
+        shell: bash
+        run: |
+          exe=$(find app/build/windows -name click_spirit.exe -path '*Release*' | head -n 1)
+          dir="$(dirname "$exe")"
+          cp app/windows/libs/click_spirit.dll "$dir/"
+          # MinGW runtime DLLs the Go c-shared library may need.
+          for d in libwinpthread-1.dll libgcc_s_seh-1.dll; do
+            for p in /c/ProgramData/mingw64/mingw64/bin /c/mingw64/bin; do
+              [ -f "$p/$d" ] && cp "$p/$d" "$dir/" && break
+            done
+          done
+          (cd "$dir" && 7z a -tzip "$GITHUB_WORKSPACE/click-spirit-windows-x64.zip" . >/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: click-spirit-windows-x64.zip
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Flutter scaffolding
+        run: bash scripts/flutter-scaffold.sh
+      - name: Universal dylib
+        run: bash scripts/build-desktop-lib.sh macos
+      - name: Flutter build macos
+        working-directory: app
+        run: flutter build macos --release --no-tree-shake-icons
+      - name: Embed dylib and zip
+        run: |
+          APP=$(find app/build/macos/Build/Products/Release -maxdepth 1 -name '*.app' -type d | head -n 1)
+          mkdir -p "$APP/Contents/Frameworks"
+          cp app/macos/libs/libclick_spirit.dylib "$APP/Contents/Frameworks/"
+          install_name_tool -id @rpath/libclick_spirit.dylib "$APP/Contents/Frameworks/libclick_spirit.dylib"
+          BIN=$(find "$APP/Contents/MacOS" -type f -perm +111 | head -n 1)
+          install_name_tool -add_rpath @executable_path/../Frameworks "$BIN" || true
+          codesign --force --deep --sign - "$APP" || true
+          ditto -c -k --keepParent "$APP" click-spirit-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: click-spirit-macos.zip
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "28.2.13676358"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK packages
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Flutter scaffolding
+        run: bash scripts/flutter-scaffold.sh
+      - name: gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          # gomobile bind needs golang.org/x/mobile/bind in the module graph (CI-only change).
+          go get golang.org/x/mobile/bind@latest
+          gomobile init
+      - name: Build AAR
+        run: bash scripts/build-android-aar.sh
+      - name: Flutter APK (release, debug-signed)
+        working-directory: app
+        run: flutter build apk --release --no-tree-shake-icons
+      - name: Rename APK
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk click-spirit.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: click-spirit.apk
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [go-test, flutter-test, linux, windows, macos, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
