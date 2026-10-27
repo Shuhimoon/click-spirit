@@ -1,5 +1,5 @@
 name: click_spirit
-description: 點擊精靈 — 跨 Android、Windows、macOS 的座標點擊工具
+description: 點擊精靈 — 跨 Android、Windows、macOS、Linux 的座標點擊工具
 publish_to: "none"
 version: 0.1.0+1
 

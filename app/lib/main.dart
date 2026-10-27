@@ -7,19 +7,32 @@ import 'engine/click_engine.dart';
 import 'engine/ffi_click_engine.dart';
 import 'ui/home_page.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
   final ClickEngine engine;
   if (Platform.isAndroid) {
+    WidgetsFlutterBinding.ensureInitialized();
     engine = ChannelClickEngine();
   } else {
-    try {
-      engine = FfiClickEngine();
-    } catch (e) {
-      engine = UnavailableClickEngine(e);
-    }
+    // Open the c-shared library before GTK. On Linux, Go's init calls
+    // XInitThreads, which has to be the first Xlib call in the process.
+    engine = await _desktopEngine();
+    WidgetsFlutterBinding.ensureInitialized();
   }
   runApp(ClickSpiritApp(engine: engine));
+}
+
+Future<ClickEngine> _desktopEngine() async {
+  try {
+    final engine = FfiClickEngine();
+    final name = await engine.backendName();
+    print('click-spirit backend: $name');
+    await stdout.flush();
+    return engine;
+  } catch (e) {
+    print('click-spirit backend: unavailable $e');
+    await stdout.flush();
+    return UnavailableClickEngine(e);
+  }
 }
 
 class ClickSpiritApp extends StatelessWidget {

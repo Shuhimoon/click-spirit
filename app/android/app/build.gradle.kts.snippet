@@ -1,5 +1,7 @@
 // Merge into app/android/app/build.gradle.kts after `flutter create`.
-// scripts/flutter-scaffold.sh appends the dependency and sets minSdk when it can.
+// scripts/patch-android-gradle.sh appends the dependency and sets minSdk when it can.
+// fileTree stays empty when clickspirit.aar has not been built yet, so the
+// Gradle configuration still succeeds.
 //
 // android {
 //     defaultConfig {
@@ -8,5 +10,5 @@
 // }
 
 dependencies {
-    implementation(files("libs/clickspirit.aar"))
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }

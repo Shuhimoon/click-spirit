@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Step;
 import 'package:path_provider/path_provider.dart';
 
 import '../engine/click_engine.dart';
@@ -47,6 +48,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _running = false;
   bool? _a11y;
   String _status = '就緒';
+  String _backend = '';
   int _captureGen = 0;
 
   @override
@@ -55,9 +57,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _apply(Script.sample());
     _sub = widget.engine.events.listen(_onEvent);
+    _loadBackend();
     if (widget.enableAccessibility) {
       _refreshA11y();
     }
+  }
+
+  Future<void> _loadBackend() async {
+    try {
+      final name = await widget.engine.backendName();
+      if (!mounted) return;
+      setState(() => _backend = name);
+    } catch (_) {}
   }
 
   @override
@@ -237,7 +248,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _reorder(int oldIndex, int newIndex) {
     setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
       final row = _rows.removeAt(oldIndex);
       _rows.insert(newIndex, row);
       if (_selected == oldIndex) {
@@ -358,6 +368,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_backend.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text('後端：$_backend'),
+          ),
+        if (Platform.isLinux)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Wayland（uinput）需要輸入裝置權限：使用者需加入 input 群組，或設定 udev 規則 KERNEL=="uinput", GROUP="input", MODE="0660"。',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
         TextField(
           controller: _name,
           decoration: const InputDecoration(
@@ -442,7 +465,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     return ReorderableListView.builder(
       itemCount: _rows.length,
-      onReorder: _reorder,
+      onReorderItem: _reorder,
       buildDefaultDragHandles: false,
       itemBuilder: (context, index) {
         final row = _rows[index];

@@ -64,6 +64,13 @@ abstract class ClickEngine {
   Stream<EngineEvent> get events;
   Future<bool> accessibilityTrusted();
   Future<void> openAccessibilitySettings();
+
+  /// Native backend name, such as x11, uinput, windows, darwin, or android.
+  Future<String> backendName();
+
+  /// Writes a PNG screenshot to [path]. An empty string means success.
+  Future<String> captureScreen(String path);
+
   void dispose();
 }
 
@@ -103,6 +110,12 @@ class UnavailableClickEngine implements ClickEngine {
 
   @override
   Future<void> openAccessibilitySettings() async {}
+
+  @override
+  Future<String> backendName() async => '';
+
+  @override
+  Future<String> captureScreen(String path) async => '原生函式庫無法載入：$error';
 
   @override
   void dispose() {

@@ -20,7 +20,9 @@ typedef _IntDart = int Function();
 typedef _CursorNative = Int32 Function(Pointer<Int32>, Pointer<Int32>);
 typedef _CursorDart = int Function(Pointer<Int32>, Pointer<Int32>);
 
-/// Loads click_spirit.dll / libclick_spirit.dylib and polls [CS_PollEvent].
+/// Loads click_spirit.dll, libclick_spirit.dylib, or libclick_spirit.so
+/// and polls [CS_PollEvent]. On Linux the shared library is the bundle's
+/// lib/libclick_spirit.so, next to the executable.
 class FfiClickEngine implements ClickEngine {
   FfiClickEngine() : _lib = _openLibrary() {
     _version = _lib.lookupFunction<_StrNative, _StrDart>('CS_Version');
@@ -32,6 +34,8 @@ class FfiClickEngine implements ClickEngine {
     _cursor = _lib.lookupFunction<_CursorNative, _CursorDart>('CS_CursorPos');
     _poll = _lib.lookupFunction<_StrNative, _StrDart>('CS_PollEvent');
     _trusted = _lib.lookupFunction<_IntNative, _IntDart>('CS_AccessibilityTrusted');
+    _backend = _lib.lookupFunction<_StrNative, _StrDart>('CS_Backend');
+    _capture = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_CaptureScreenPNG');
     _free = _lib.lookupFunction<_FreeNative, _FreeDart>('CS_FreeString');
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _pollOnce());
   }
@@ -46,6 +50,8 @@ class FfiClickEngine implements ClickEngine {
   late final _CursorDart _cursor;
   late final _StrDart _poll;
   late final _IntDart _trusted;
+  late final _StrDart _backend;
+  late final _StrInDart _capture;
   late final _FreeDart _free;
   late final Timer _timer;
   final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
@@ -63,6 +69,7 @@ class FfiClickEngine implements ClickEngine {
       candidates.add('libclick_spirit.dylib');
     } else if (Platform.isLinux) {
       final dir = File(Platform.resolvedExecutable).parent.path;
+      candidates.add(_join(_join(dir, 'lib'), 'libclick_spirit.so'));
       candidates.add(_join(dir, 'libclick_spirit.so'));
       candidates.add('libclick_spirit.so');
     } else {
@@ -157,6 +164,12 @@ class FfiClickEngine implements ClickEngine {
 
   @override
   Future<void> openAccessibilitySettings() async {}
+
+  @override
+  Future<String> backendName() async => _take(_backend());
+
+  @override
+  Future<String> captureScreen(String path) async => _callIn(_capture, path);
 
   @override
   void dispose() {

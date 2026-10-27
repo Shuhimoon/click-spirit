@@ -69,5 +69,11 @@ class ChannelClickEngine implements ClickEngine {
   }
 
   @override
+  Future<String> backendName() async => 'android';
+
+  @override
+  Future<String> captureScreen(String path) async => '此平台尚未實作截圖';
+
+  @override
   void dispose() {}
 }
