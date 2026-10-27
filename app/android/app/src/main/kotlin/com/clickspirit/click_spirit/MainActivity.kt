@@ -73,6 +73,27 @@ class MainActivity : FlutterActivity() {
                     Mobile.stop()
                     null
                 }
+                "emergencyStop" -> async(result) {
+                    Mobile.emergencyStop()
+                    null
+                }
+                "setHotkey" -> result.success("Android 沒有全域熱鍵")
+                "startRecording" -> result.success(
+                    "{\"error\":\"Android 不支援錄製，沒有全域輸入鉤子\"}",
+                )
+                "stopRecording" -> result.success(
+                    "{\"error\":\"Android 不支援錄製，沒有全域輸入鉤子\"}",
+                )
+                "matchImage" -> async(result) {
+                    val template = asBytes(call.argument<Any>("template"))
+                    val screen = asBytes(call.argument<Any>("screen"))
+                    val threshold = asDouble(call.argument<Any>("threshold"))
+                    if (template == null || screen == null) {
+                        "{\"found\":false,\"x\":0,\"y\":0,\"score\":0,\"error\":\"Android 找圖需要螢幕與模板的 PNG 位元組，目前尚未接上截圖\"}"
+                    } else {
+                        Mobile.matchImage(screen, template, threshold)
+                    }
+                }
                 "isRunning" -> async(result) { Mobile.isRunning() }
                 "accessibilityTrusted" -> result.success(accessibilityEnabled())
                 "openAccessibilitySettings" -> {
@@ -121,6 +142,17 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    private fun asBytes(value: Any?): ByteArray? = value as? ByteArray
+
+    private fun asDouble(value: Any?): Double = when (value) {
+        is Double -> value
+        is Float -> value.toDouble()
+        is Int -> value.toDouble()
+        is Long -> value.toDouble()
+        is Number -> value.toDouble()
+        else -> 0.0
     }
 
     private fun accessibilityEnabled(): Boolean {

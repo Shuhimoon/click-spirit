@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 
@@ -73,6 +75,43 @@ class ChannelClickEngine implements ClickEngine {
 
   @override
   Future<String> captureScreen(String path) async => '此平台尚未實作截圖';
+
+  @override
+  Future<void> emergencyStop() async {
+    await _method.invokeMethod<void>('emergencyStop');
+  }
+
+  @override
+  Future<String> setHotkey(String name) => _stringCall('setHotkey', {'name': name});
+
+  @override
+  Future<String> startRecording() => _stringCall('startRecording');
+
+  @override
+  Future<String> stopRecording() => _stringCall('stopRecording');
+
+  @override
+  Future<String> matchImage(String templatePath, double threshold, {Uint8List? screenPng}) async {
+    Uint8List template;
+    try {
+      template = await File(templatePath).readAsBytes();
+    } catch (e) {
+      return matchErrorJson('無法讀取模板：$e');
+    }
+    final args = <String, Object?>{
+      'template': template,
+      'threshold': threshold,
+    };
+    if (screenPng != null) args['screen'] = screenPng;
+    final raw = await _stringCall('matchImage', args);
+    if (raw.isEmpty) return matchErrorJson('沒有回應');
+    try {
+      jsonDecode(raw);
+      return raw;
+    } catch (_) {
+      return matchErrorJson(raw);
+    }
+  }
 
   @override
   void dispose() {}

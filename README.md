@@ -204,7 +204,7 @@ CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
 在 Windows 本機把 `CC` 設成 `gcc` 即可。DLL 要放在 exe 旁邊。`app/windows/CMakeLists.txt` 會在 `app/windows/libs/click_spirit.dll` 已經存在時，把它安裝到 exe 旁邊。請先建 DLL，再跑 Flutter。細節見 `app/windows/README-native.md`。
 
 ```bash
-cd app && flutter build windows
+cd app && flutter build windows --no-tree-shake-icons
 ```
 
 ### macOS
@@ -213,7 +213,7 @@ cd app && flutter build windows
 
 ```bash
 bash scripts/build-desktop-lib.sh macos
-cd app && flutter build macos
+cd app && flutter build macos --no-tree-shake-icons
 ```
 
 腳本會產出 arm64 與 amd64 兩份 dylib，用 `lipo` 合成 `app/macos/libs/libclick_spirit.dylib`，並把 install name 設成 `@rpath/libclick_spirit.dylib`。Sandbox 必須關閉，否則 `CGEventPost` 會失敗。嵌入 Frameworks、輔助使用權限、簽章與公證的步驟見 `app/macos/README-native.md`。
@@ -224,8 +224,10 @@ cd app && flutter build macos
 
 ```bash
 bash scripts/build-desktop-lib.sh linux
-cd app && flutter build linux
+cd app && flutter build linux --no-tree-shake-icons
 ```
+
+`--no-tree-shake-icons`：目前 Flutter 版本的圖示字型裁剪會把部分 Material 圖示（緊急停止、錄製、複製等）畫成錯字，所以發行版先關掉裁剪。
 
 等同：
 
@@ -263,7 +265,7 @@ go install golang.org/x/mobile/cmd/gomobile@latest
 go install golang.org/x/mobile/cmd/gobind@latest
 gomobile init
 bash scripts/build-android-aar.sh
-cd app && flutter build apk
+cd app && flutter build apk --no-tree-shake-icons
 ```
 
 AAR 輸出到 `app/android/app/libs/clickspirit.aar`。Java 套件是 `com.clickspirit.mobile`。`minSdk` 為 24，因為 `dispatchGesture` 從 API 24 才有。

@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/click_engine.dart';
 import '../model/script.dart';
+import 'step_dialog.dart';
+import 'step_list.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -26,26 +28,24 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _StepRow {
-  _StepRow(this.step) : id = _nextId++;
-  static int _nextId = 1;
-  final int id;
-  Step step;
-}
-
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _name = TextEditingController();
   final _repeat = TextEditingController();
   final _defaultInterval = TextEditingController();
   final _loopInterval = TextEditingController();
   final _startDelay = TextEditingController();
+  final _hotkey = TextEditingController(text: 'F12');
   final _logScroll = ScrollController();
-  final List<_StepRow> _rows = [];
+  final List<StepRow> _rows = [];
   final List<EngineEvent> _log = [];
 
   StreamSubscription<EngineEvent>? _sub;
   int? _selected;
+  int? _activeStep;
+  int _activeRepetition = 0;
   bool _running = false;
+  bool _recording = false;
+  bool _sawEmergency = false;
   bool? _a11y;
   String _status = '就緒';
   String _backend = '';
@@ -82,6 +82,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _defaultInterval.dispose();
     _loopInterval.dispose();
     _startDelay.dispose();
+    _hotkey.dispose();
     _logScroll.dispose();
     super.dispose();
   }
@@ -99,10 +100,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _defaultInterval.text = '${script.defaultIntervalMs}';
     _loopInterval.text = '${script.loopIntervalMs}';
     _startDelay.text = '${script.startDelayMs}';
+    _hotkey.text = script.emergencyHotkey.isEmpty ? 'F12' : script.emergencyHotkey;
     _rows
       ..clear()
-      ..addAll(script.steps.map(_StepRow.new));
+      ..addAll(script.steps.map(StepRow.new));
     _selected = null;
+    _activeStep = null;
   }
 
   Script _current() {
@@ -114,6 +117,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       defaultIntervalMs: _readInt(_defaultInterval),
       loopIntervalMs: _readInt(_loopInterval),
       startDelayMs: _readInt(_startDelay),
+      emergencyHotkey: _hotkey.text.trim(),
     );
   }
 
@@ -128,18 +132,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (_log.length > 200) {
         _log.removeRange(0, _log.length - 200);
       }
-      if (ev.kind == 'started') {
-        _running = true;
-        _status = '執行中';
-      } else if (ev.kind == 'finished') {
-        _running = false;
-        _status = '執行完成';
-      } else if (ev.kind == 'stopped') {
-        _running = false;
-        _status = '已停止';
-      } else if (ev.kind == 'error') {
-        _running = false;
-        _status = ev.message.isEmpty ? '錯誤' : ev.message;
+      switch (ev.kind) {
+        case 'started':
+          _running = true;
+          _sawEmergency = false;
+          _activeStep = null;
+          _status = '執行中';
+        case 'step':
+          _running = true;
+          if (ev.step >= 0 && ev.step < _rows.length) {
+            _activeStep = ev.step;
+            _activeRepetition = ev.repetition;
+            final total = _rows[ev.step].step.effectiveRepeat;
+            _status = '執行中：步驟 ${ev.step + 1}，第 ${ev.repetition + 1}/$total 次';
+          } else {
+            _status = '執行中';
+          }
+        case 'finished':
+          _running = false;
+          _activeStep = null;
+          _status = '執行完成';
+        case 'stopped':
+          _running = false;
+          _activeStep = null;
+          if (!_sawEmergency) _status = '已停止';
+        case 'emergency_stop':
+          _running = false;
+          _sawEmergency = true;
+          _activeStep = null;
+          _status = '緊急停止';
+        case 'error':
+          _running = false;
+          _activeStep = null;
+          _status = ev.message.isEmpty ? '錯誤' : ev.message;
+        default:
+          break;
       }
     });
     _scrollLog();
@@ -224,51 +251,63 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _add() async {
-    final step = await _editDialog(null);
+    final step = await showStepEditor(context, engine: widget.engine);
     if (step == null || !mounted) return;
-    setState(() => _rows.add(_StepRow(step)));
+    setState(() => _rows.add(StepRow(step)));
   }
 
   Future<void> _edit(int index) async {
-    final step = await _editDialog(_rows[index].step);
+    final step = await showStepEditor(context, initial: _rows[index].step, engine: widget.engine);
     if (step == null || !mounted) return;
     setState(() => _rows[index].step = step);
   }
 
-  Future<void> _delete(int index) async {
+  void _delete(int index) {
     setState(() {
       _rows.removeAt(index);
-      if (_selected == index) {
-        _selected = null;
-      } else if (_selected != null && _selected! > index) {
-        _selected = _selected! - 1;
+      if (_selected != null) {
+        if (_selected == index) {
+          _selected = null;
+        } else if (_selected! > index) {
+          _selected = _selected! - 1;
+        }
+      }
+      if (_activeStep != null) {
+        if (_activeStep == index) {
+          _activeStep = null;
+        } else if (_activeStep! > index) {
+          _activeStep = _activeStep! - 1;
+        }
       }
     });
+  }
+
+  void _duplicate(int index) {
+    setState(() => _rows.insert(index + 1, StepRow(_rows[index].step.copy())));
   }
 
   void _reorder(int oldIndex, int newIndex) {
     setState(() {
       final row = _rows.removeAt(oldIndex);
       _rows.insert(newIndex, row);
-      if (_selected == oldIndex) {
-        _selected = newIndex;
-      }
+      _selected = _selected == null ? null : shiftAfterReorder(_selected!, oldIndex, newIndex);
+      _activeStep = _activeStep == null ? null : shiftAfterReorder(_activeStep!, oldIndex, newIndex);
     });
   }
 
-  Future<Step?> _editDialog(Step? initial) {
-    return showDialog<Step>(
-      context: context,
-      builder: (context) => _StepDialog(initial: initial),
-    );
-  }
-
   Future<void> _start() async {
-    final raw = jsonEncode(_current().toJson());
+    final script = _current();
+    final raw = jsonEncode(script.toJson());
     final invalid = await widget.engine.validate(raw);
     if (!mounted) return;
     if (invalid.isNotEmpty) {
       setState(() => _status = '驗證失敗：$invalid');
+      return;
+    }
+    final hotkeyError = await widget.engine.setHotkey(script.emergencyHotkey);
+    if (!mounted) return;
+    if (hotkeyError.isNotEmpty && widget.enableCursorCapture) {
+      setState(() => _status = '無法設定熱鍵：$hotkeyError');
       return;
     }
     final err = await widget.engine.start(raw);
@@ -279,7 +318,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _status = '無法開始：$err';
       } else {
         _running = true;
-        _status = '執行中';
+        _sawEmergency = false;
+        _status = hotkeyError.isEmpty ? '執行中' : '執行中（$hotkeyError）';
       }
     });
   }
@@ -289,8 +329,71 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _running = false;
+      _sawEmergency = false;
+      _activeStep = null;
       _status = '已停止';
     });
+  }
+
+  Future<void> _emergency() async {
+    await widget.engine.emergencyStop();
+    if (!mounted) return;
+    setState(() {
+      _running = false;
+      _sawEmergency = true;
+      _activeStep = null;
+      _status = '緊急停止';
+    });
+  }
+
+  Future<void> _startRecording() async {
+    final raw = await widget.engine.startRecording();
+    if (!mounted) return;
+    final err = payloadError(raw);
+    setState(() {
+      if (err != null) {
+        _recording = false;
+        _status = '無法錄製：$err';
+      } else {
+        _recording = true;
+        _status = '錄製中';
+      }
+    });
+  }
+
+  Future<void> _stopRecording() async {
+    final raw = await widget.engine.stopRecording();
+    if (!mounted) return;
+    final err = payloadError(raw);
+    if (err != null) {
+      setState(() {
+        _recording = false;
+        _status = '無法停止錄製：$err';
+      });
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) throw const FormatException('不是腳本');
+      final script = Script.fromJson(Map<String, dynamic>.from(decoded));
+      if (script.steps.isEmpty) {
+        setState(() {
+          _recording = false;
+          _status = '錄製結果沒有步驟';
+        });
+        return;
+      }
+      setState(() {
+        _apply(script);
+        _recording = false;
+        _status = '已載入錄製腳本';
+      });
+    } catch (e) {
+      setState(() {
+        _recording = false;
+        _status = '錄製結果無法解析：$e';
+      });
+    }
   }
 
   Future<void> _capture() async {
@@ -309,11 +412,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     setState(() {
       final index = _selected;
-      if (index != null && index >= 0 && index < _rows.length) {
+      if (index != null && index >= 0 && index < _rows.length && _rows[index].step.kindOrPoint == 'point') {
         _rows[index].step = _rows[index].step.copyWith(x: pos.x, y: pos.y);
         _status = '已更新步驟 ${index + 1}：${pos.x}, ${pos.y}';
       } else {
-        _rows.add(_StepRow(Step(
+        _rows.add(StepRow(Step(
           x: pos.x,
           y: pos.y,
           button: 'left',
@@ -339,27 +442,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         actions: [
           IconButton(tooltip: '開啟', onPressed: _open, icon: const Icon(Icons.folder_open)),
           IconButton(tooltip: '儲存', onPressed: _save, icon: const Icon(Icons.save)),
-          IconButton(tooltip: '新增步驟', onPressed: _add, icon: const Icon(Icons.add)),
+          IconButton(tooltip: '新增步驟', onPressed: _running ? null : _add, icon: const Icon(Icons.add)),
         ],
       ),
-      body: Column(
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 250),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: _settings(),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: _actions(),
-          ),
-          const Divider(height: 1),
-          Expanded(child: _stepList()),
-          const Divider(height: 1),
-          _logPane(),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final preferred = constraints.maxHeight * 0.34;
+          final headerMax = preferred < 150 ? 150.0 : (preferred > 230 ? 230.0 : preferred);
+          return Column(
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: headerMax),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: _settings(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: _actions(),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: StepList(
+                  rows: _rows,
+                  selected: _selected,
+                  activeIndex: _activeStep,
+                  activeRepetition: _activeRepetition,
+                  onSelect: (index) => setState(() => _selected = index),
+                  onEdit: _edit,
+                  onDelete: _delete,
+                  onDuplicate: _duplicate,
+                  onReorder: _reorder,
+                ),
+              ),
+              const Divider(height: 1),
+              _logPane(),
+            ],
+          );
+        },
       ),
     );
   }
@@ -398,18 +519,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             _numField(_defaultInterval, '預設間隔（毫秒）'),
             _numField(_loopInterval, '迴圈間隔（毫秒）'),
             _numField(_startDelay, '開始延遲（毫秒）'),
+            _numField(_hotkey, '緊急停止熱鍵', number: false),
           ],
         ),
       ],
     );
   }
 
-  Widget _numField(TextEditingController controller, String label) {
+  Widget _numField(TextEditingController controller, String label, {bool number = true}) {
     return SizedBox(
       width: 220,
       child: TextField(
         controller: controller,
-        keyboardType: TextInputType.number,
+        keyboardType: number ? TextInputType.number : TextInputType.text,
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
@@ -421,13 +543,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _actions() {
     final a11y = _a11y;
+    final busy = _running || _recording;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         FilledButton.icon(
-          onPressed: _running ? null : _start,
+          onPressed: busy ? null : _start,
           icon: const Icon(Icons.play_arrow),
           label: const Text('開始'),
         ),
@@ -436,9 +559,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           icon: const Icon(Icons.stop),
           label: const Text('停止'),
         ),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
+          ),
+          onPressed: _emergency,
+          icon: const Icon(Icons.front_hand),
+          label: const Text('緊急停止'),
+        ),
+        OutlinedButton.icon(
+          onPressed: busy ? null : _startRecording,
+          icon: const Icon(Icons.fiber_manual_record),
+          label: const Text('開始錄製'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _recording ? _stopRecording : null,
+          icon: const Icon(Icons.stop_circle_outlined),
+          label: const Text('停止錄製'),
+        ),
         if (widget.enableCursorCapture)
           OutlinedButton.icon(
-            onPressed: _running ? null : _capture,
+            onPressed: busy ? null : _capture,
             icon: const Icon(Icons.my_location),
             label: const Text('擷取座標'),
           ),
@@ -454,63 +596,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ? '無障礙服務：已啟用'
                   : '無障礙服務：未啟用'),
         ],
-        Text(_status),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Text(_status, key: const Key('status-text')),
+        ),
       ],
-    );
-  }
-
-  Widget _stepList() {
-    if (_rows.isEmpty) {
-      return const Center(child: Text('尚未加入步驟'));
-    }
-    return ReorderableListView.builder(
-      itemCount: _rows.length,
-      onReorderItem: _reorder,
-      buildDefaultDragHandles: false,
-      itemBuilder: (context, index) {
-        final row = _rows[index];
-        final step = row.step;
-        final selected = _selected == index;
-        return Material(
-          key: ValueKey(row.id),
-          color: selected ? Theme.of(context).colorScheme.secondaryContainer : null,
-          child: ListTile(
-            onTap: () => setState(() => _selected = index),
-            title: Text('${index + 1}. ${ _buttonLabel(step.button)}  (${step.x}, ${step.y})'),
-            subtitle: Text(
-              '次數 ${step.clicks == 0 ? "1（預設）" : step.clicks.toString()}  間隔 ${step.intervalMs} ms  按住 ${step.holdMs} ms',
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  tooltip: '編輯',
-                  onPressed: () => _edit(index),
-                  icon: const Icon(Icons.edit),
-                ),
-                IconButton(
-                  tooltip: '刪除',
-                  onPressed: () => _delete(index),
-                  icon: const Icon(Icons.delete),
-                ),
-                ReorderableDragStartListener(
-                  index: index,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.drag_handle),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
   Widget _logPane() {
     return SizedBox(
-      height: 150,
+      height: 108,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -534,149 +630,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ],
       ),
-    );
-  }
-
-  String _buttonLabel(String button) {
-    switch (button) {
-      case 'left':
-        return '左鍵';
-      case 'right':
-        return '右鍵';
-      case 'middle':
-        return '中鍵';
-      default:
-        return button;
-    }
-  }
-}
-
-class _StepDialog extends StatefulWidget {
-  const _StepDialog({this.initial});
-
-  final Step? initial;
-
-  @override
-  State<_StepDialog> createState() => _StepDialogState();
-}
-
-class _StepDialogState extends State<_StepDialog> {
-  late final TextEditingController _x;
-  late final TextEditingController _y;
-  late final TextEditingController _interval;
-  late final TextEditingController _hold;
-  late String _button;
-  late int _clicks;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    final step = widget.initial;
-    _x = TextEditingController(text: '${step?.x ?? 0}');
-    _y = TextEditingController(text: '${step?.y ?? 0}');
-    _interval = TextEditingController(text: '${step?.intervalMs ?? 0}');
-    _hold = TextEditingController(text: '${step?.holdMs ?? 0}');
-    _button = step?.button ?? 'left';
-    if (_button != 'left' && _button != 'right' && _button != 'middle') {
-      _button = 'left';
-    }
-    final clicks = step?.clicks ?? 1;
-    _clicks = clicks == 0 ? 1 : clicks.clamp(1, 3).toInt();
-  }
-
-  @override
-  void dispose() {
-    _x.dispose();
-    _y.dispose();
-    _interval.dispose();
-    _hold.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final x = int.tryParse(_x.text.trim());
-    final y = int.tryParse(_y.text.trim());
-    final interval = int.tryParse(_interval.text.trim());
-    final hold = int.tryParse(_hold.text.trim());
-    if (x == null || y == null || x < 0 || y < 0) {
-      setState(() => _error = 'X、Y 必須是大於等於 0 的整數');
-      return;
-    }
-    if (interval == null || hold == null || interval < 0 || hold < 0) {
-      setState(() => _error = '間隔與按住時間必須是大於等於 0 的整數');
-      return;
-    }
-    Navigator.of(context).pop(Step(
-      x: x,
-      y: y,
-      button: _button,
-      clicks: _clicks,
-      intervalMs: interval,
-      holdMs: hold,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.initial == null ? '新增步驟' : '編輯步驟'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _x,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'X 座標'),
-            ),
-            TextField(
-              controller: _y,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Y 座標'),
-            ),
-            DropdownButtonFormField<String>(
-              initialValue: _button,
-              decoration: const InputDecoration(labelText: '按鍵'),
-              items: const [
-                DropdownMenuItem(value: 'left', child: Text('左鍵')),
-                DropdownMenuItem(value: 'right', child: Text('右鍵')),
-                DropdownMenuItem(value: 'middle', child: Text('中鍵')),
-              ],
-              onChanged: (value) => setState(() => _button = value ?? 'left'),
-            ),
-            DropdownButtonFormField<int>(
-              initialValue: _clicks,
-              decoration: const InputDecoration(labelText: '點擊次數'),
-              items: const [
-                DropdownMenuItem(value: 1, child: Text('1')),
-                DropdownMenuItem(value: 2, child: Text('2')),
-                DropdownMenuItem(value: 3, child: Text('3')),
-              ],
-              onChanged: (value) => setState(() => _clicks = value ?? 1),
-            ),
-            TextField(
-              controller: _interval,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '間隔（毫秒，0 表示用預設）'),
-            ),
-            TextField(
-              controller: _hold,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '按住（毫秒）'),
-            ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
-        FilledButton(onPressed: _submit, child: const Text('確定')),
-      ],
     );
   }
 }

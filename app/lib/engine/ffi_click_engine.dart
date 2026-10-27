@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -19,6 +20,8 @@ typedef _IntNative = Int32 Function();
 typedef _IntDart = int Function();
 typedef _CursorNative = Int32 Function(Pointer<Int32>, Pointer<Int32>);
 typedef _CursorDart = int Function(Pointer<Int32>, Pointer<Int32>);
+typedef _MatchNative = Pointer<Utf8> Function(Pointer<Utf8>, Double);
+typedef _MatchDart = Pointer<Utf8> Function(Pointer<Utf8>, double);
 
 /// Loads click_spirit.dll, libclick_spirit.dylib, or libclick_spirit.so
 /// and polls [CS_PollEvent]. On Linux the shared library is the bundle's
@@ -36,6 +39,11 @@ class FfiClickEngine implements ClickEngine {
     _trusted = _lib.lookupFunction<_IntNative, _IntDart>('CS_AccessibilityTrusted');
     _backend = _lib.lookupFunction<_StrNative, _StrDart>('CS_Backend');
     _capture = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_CaptureScreenPNG');
+    _emergency = _lib.lookupFunction<_VoidNative, _VoidDart>('CS_EmergencyStop');
+    _setHotkey = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_SetHotkey');
+    _startRecording = _lib.lookupFunction<_StrNative, _StrDart>('CS_StartRecording');
+    _stopRecording = _lib.lookupFunction<_StrNative, _StrDart>('CS_StopRecording');
+    _match = _lib.lookupFunction<_MatchNative, _MatchDart>('CS_MatchImage');
     _free = _lib.lookupFunction<_FreeNative, _FreeDart>('CS_FreeString');
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _pollOnce());
   }
@@ -52,6 +60,11 @@ class FfiClickEngine implements ClickEngine {
   late final _IntDart _trusted;
   late final _StrDart _backend;
   late final _StrInDart _capture;
+  late final _VoidDart _emergency;
+  late final _StrInDart _setHotkey;
+  late final _StrDart _startRecording;
+  late final _StrDart _stopRecording;
+  late final _MatchDart _match;
   late final _FreeDart _free;
   late final Timer _timer;
   final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
@@ -172,8 +185,31 @@ class FfiClickEngine implements ClickEngine {
   Future<String> captureScreen(String path) async => _callIn(_capture, path);
 
   @override
+  Future<void> emergencyStop() async => _emergency();
+
+  @override
+  Future<String> setHotkey(String name) async => _callIn(_setHotkey, name);
+
+  @override
+  Future<String> startRecording() async => _take(_startRecording());
+
+  @override
+  Future<String> stopRecording() async => _take(_stopRecording());
+
+  @override
+  Future<String> matchImage(String templatePath, double threshold, {Uint8List? screenPng}) async {
+    // CS_MatchImage captures the screen itself. screenPng is the Android path.
+    final native = templatePath.toNativeUtf8();
+    try {
+      return _take(_match(native, threshold));
+    } finally {
+      calloc.free(native);
+    }
+  }
+
+  @override
   void dispose() {
     _timer.cancel();
-    _events.close();
+    if (!_events.isClosed) _events.close();
   }
 }

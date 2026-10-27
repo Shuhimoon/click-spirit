@@ -50,7 +50,7 @@ jobs:
         run: bash scripts/build-desktop-lib.sh linux
       - name: Flutter build linux
         working-directory: app
-        run: flutter build linux --release
+        run: flutter build linux --release --no-tree-shake-icons
       - name: Package bundle
         run: tar -C app/build/linux/x64/release -czf click_spirit-linux.tar.gz bundle
       - uses: actions/upload-artifact@v4
@@ -82,7 +82,7 @@ jobs:
           CC=gcc bash scripts/build-desktop-lib.sh windows
       - name: Flutter build windows
         working-directory: app
-        run: flutter build windows
+        run: flutter build windows --no-tree-shake-icons
       - name: Copy DLL next to the exe
         shell: bash
         run: |
@@ -109,7 +109,7 @@ jobs:
         run: bash scripts/build-desktop-lib.sh macos
       - name: Flutter build macos
         working-directory: app
-        run: flutter build macos
+        run: flutter build macos --no-tree-shake-icons
       - name: Embed dylib and zip
         run: |
           APP=$(find app/build/macos/Build/Products -name '*.app' -type d | head -n 1)
@@ -149,7 +149,7 @@ jobs:
         run: bash scripts/build-android-aar.sh
       - name: Flutter APK
         working-directory: app
-        run: flutter build apk
+        run: flutter build apk --no-tree-shake-icons
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
