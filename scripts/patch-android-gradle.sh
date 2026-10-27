@@ -7,11 +7,11 @@ if [[ ! -f "$GRADLE" ]]; then
   echo "skip gradle patch; missing $GRADLE"
   exit 0
 fi
-if ! grep -q 'clickspirit.aar' "$GRADLE"; then
+if ! grep -q 'clickspirit.aar' "$GRADLE" && ! grep -q 'fileTree' "$GRADLE"; then
   cat >>"$GRADLE" <<'EOF'
 
 dependencies {
-    implementation(files("libs/clickspirit.aar"))
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }
 EOF
 fi

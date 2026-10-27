@@ -30,10 +30,13 @@ build/
 .vscode/
 .DS_Store
 
-# Generated desktop/android libraries (keep the directories)
+# Generated desktop/android libraries (keep the directories).
+# c-shared builds also emit a C header next to the library.
 app/windows/libs/*
 !app/windows/libs/.gitkeep
 app/macos/libs/*
 !app/macos/libs/.gitkeep
+app/linux/libs/*
+!app/linux/libs/.gitkeep
 app/android/app/libs/*
 !app/android/app/libs/.gitkeep

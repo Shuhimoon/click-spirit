@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build the c-shared library loaded by the Flutter desktop FFI engine.
 #
+# Linux:
+#   CGO_ENABLED=1 go build -buildmode=c-shared -o app/linux/libs/libclick_spirit.so ./ffi
 # Windows (native, or cross from Linux/macOS):
 #   CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
 #     go build -buildmode=c-shared -o app/windows/libs/click_spirit.dll ./ffi
@@ -8,7 +10,16 @@
 #   install_name_tool -id @rpath/libclick_spirit.dylib
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p app/windows/libs app/macos/libs
+mkdir -p app/windows/libs app/macos/libs app/linux/libs
+
+build_linux() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "skip linux shared library: not running on Linux"
+    return 0
+  fi
+  echo "building Linux shared library"
+  CGO_ENABLED=1 go build -buildmode=c-shared -o app/linux/libs/libclick_spirit.so ./ffi
+}
 
 build_windows() {
   local cc="${CC:-}"
@@ -48,12 +59,14 @@ target="${1:-all}"
 case "$target" in
   windows) build_windows ;;
   macos) build_macos ;;
+  linux) build_linux ;;
   all)
     build_windows
     build_macos
+    build_linux
     ;;
   *)
-    echo "usage: $0 [all|windows|macos]" >&2
+    echo "usage: $0 [all|windows|macos|linux]" >&2
     exit 2
     ;;
 esac

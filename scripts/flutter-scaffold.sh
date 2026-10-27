@@ -33,8 +33,9 @@ move_if_missing() {
 move_if_missing android android/settings.gradle.kts android/settings.gradle
 move_if_missing windows windows/CMakeLists.txt
 move_if_missing macos macos/Runner.xcodeproj
+move_if_missing linux linux/CMakeLists.txt
 
-flutter create --platforms=android,windows,macos --org com.clickspirit --project-name click_spirit .
+flutter create --platforms=android,windows,macos,linux --org com.clickspirit --project-name click_spirit .
 
 restore() {
   local dir="$1"
@@ -46,6 +47,7 @@ restore() {
 restore android
 restore windows
 restore macos
+restore linux
 
 bash "$ROOT/scripts/patch-android-gradle.sh"
 echo "flutter scaffolding ready"
