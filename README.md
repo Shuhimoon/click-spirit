@@ -16,7 +16,7 @@ click-spirit/
 ├── cmd/clicker/          指令列工具
 ├── app/                  Flutter 介面（Android、Windows、macOS、Linux）
 ├── scripts/              建置腳本
-└── .github/workflows/    CI
+└── ci/github-workflows/   CI（啟用時移到 .github/workflows/）
 ```
 
 執行路徑：
