@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart' hide Step;
@@ -9,8 +10,10 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/click_engine.dart';
 import '../model/script.dart';
+import 'glass.dart';
 import 'step_dialog.dart';
 import 'step_list.dart';
+import 'theme.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -45,6 +48,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _activeRepetition = 0;
   bool _running = false;
   bool _recording = false;
+  bool _logOpen = true;
   bool _sawEmergency = false;
   bool? _a11y;
   String _status = '就緒';
@@ -436,200 +440,475 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('點擊精靈'),
-        actions: [
-          IconButton(tooltip: '開啟', onPressed: _open, icon: const Icon(Icons.folder_open)),
-          IconButton(tooltip: '儲存', onPressed: _save, icon: const Icon(Icons.save)),
-          IconButton(tooltip: '新增步驟', onPressed: _running ? null : _add, icon: const Icon(Icons.add)),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final preferred = constraints.maxHeight * 0.34;
-          final headerMax = preferred < 150 ? 150.0 : (preferred > 230 ? 230.0 : preferred);
-          return Column(
-            children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: headerMax),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                  child: _settings(),
+    final dark = ClickSpiritColors.isDark(context);
+    final barColor = dark ? Colors.black.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.46);
+    final hairline = dark ? Colors.white.withValues(alpha: 0.10) : Colors.black.withValues(alpha: 0.06);
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        extendBodyBehindAppBar: true,
+        appBar: PreferredSize(
+          preferredSize: const Size.fromHeight(64),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: barColor,
+                  border: Border(bottom: BorderSide(color: hairline)),
+                ),
+                child: AppBar(
+                  forceMaterialTransparency: true,
+                  title: const Text('點擊精靈'),
+                  actions: [
+                    IconButton(
+                      tooltip: '開啟',
+                      onPressed: _open,
+                      icon: const Icon(Icons.folder_open_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '儲存',
+                      onPressed: _save,
+                      icon: const Icon(Icons.save_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '新增步驟',
+                      onPressed: _running ? null : _add,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: _actions(),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: StepList(
-                  rows: _rows,
-                  selected: _selected,
-                  activeIndex: _activeStep,
-                  activeRepetition: _activeRepetition,
-                  onSelect: (index) => setState(() => _selected = index),
-                  onEdit: _edit,
-                  onDelete: _delete,
-                  onDuplicate: _duplicate,
-                  onReorder: _reorder,
-                ),
-              ),
-              const Divider(height: 1),
-              _logPane(),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _settings() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_backend.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text('後端：$_backend'),
-          ),
-        if (Platform.isLinux)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Wayland（uinput）需要輸入裝置權限：使用者需加入 input 群組，或設定 udev 規則 KERNEL=="uinput", GROUP="input", MODE="0660"。',
-              style: TextStyle(fontSize: 12),
             ),
           ),
-        TextField(
-          controller: _name,
-          decoration: const InputDecoration(
-            labelText: '腳本名稱',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
         ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _numField(_repeat, '重複次數（0 代表無限）'),
-            _numField(_defaultInterval, '預設間隔（毫秒）'),
-            _numField(_loopInterval, '迴圈間隔（毫秒）'),
-            _numField(_startDelay, '開始延遲（毫秒）'),
-            _numField(_hotkey, '緊急停止熱鍵', number: false),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _numField(TextEditingController controller, String label, {bool number = true}) {
-    return SizedBox(
-      width: 220,
-      child: TextField(
-        controller: controller,
-        keyboardType: number ? TextInputType.number : TextInputType.text,
-        decoration: InputDecoration(
-          labelText: label,
-          isDense: true,
-          border: const OutlineInputBorder(),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 700;
+            final pad = wide ? 24.0 : 20.0;
+            // extendBodyBehindAppBar already includes the bar in padding.top.
+            final top = MediaQuery.paddingOf(context).top + 12;
+            return Padding(
+              padding: EdgeInsets.fromLTRB(pad, top, pad, 16),
+              child: wide ? _wideLayout() : _narrowLayout(),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _actions() {
-    final a11y = _a11y;
-    final busy = _running || _recording;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
+  Widget _wideLayout() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        FilledButton.icon(
-          onPressed: busy ? null : _start,
-          icon: const Icon(Icons.play_arrow),
-          label: const Text('開始'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _running ? _stop : null,
-          icon: const Icon(Icons.stop),
-          label: const Text('停止'),
-        ),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.error,
-            foregroundColor: Theme.of(context).colorScheme.onError,
+        _statusCard(),
+        const SizedBox(height: 14),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(flex: 5, child: _settingsPanel()),
+              const SizedBox(width: 16),
+              Expanded(flex: 6, child: _stepPanel()),
+            ],
           ),
-          onPressed: _emergency,
-          icon: const Icon(Icons.front_hand),
-          label: const Text('緊急停止'),
         ),
-        OutlinedButton.icon(
-          onPressed: busy ? null : _startRecording,
-          icon: const Icon(Icons.fiber_manual_record),
-          label: const Text('開始錄製'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _recording ? _stopRecording : null,
-          icon: const Icon(Icons.stop_circle_outlined),
-          label: const Text('停止錄製'),
-        ),
-        if (widget.enableCursorCapture)
-          OutlinedButton.icon(
-            onPressed: busy ? null : _capture,
-            icon: const Icon(Icons.my_location),
-            label: const Text('擷取座標'),
-          ),
-        if (widget.enableAccessibility) ...[
-          OutlinedButton.icon(
-            onPressed: _openA11y,
-            icon: const Icon(Icons.accessibility_new),
-            label: const Text('開啟無障礙設定'),
-          ),
-          Text(a11y == null
-              ? '無障礙服務：讀取中'
-              : a11y
-                  ? '無障礙服務：已啟用'
-                  : '無障礙服務：未啟用'),
-        ],
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Text(_status, key: const Key('status-text')),
-        ),
+        const SizedBox(height: 14),
+        _controlBar(),
+        const SizedBox(height: 14),
+        _logPane(),
       ],
     );
   }
 
-  Widget _logPane() {
-    return SizedBox(
-      height: 108,
+  Widget _narrowLayout() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final headerMax = (constraints.maxHeight * 0.46).clamp(160.0, 300.0);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: headerMax,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _statusCard(),
+                    const SizedBox(height: 12),
+                    _settingsFields(),
+                    const SizedBox(height: 12),
+                    _controlBar(),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(child: _stepPanel()),
+            const SizedBox(height: 12),
+            _logPane(),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _statusCard() {
+    final secondary = ClickSpiritColors.secondary(context);
+    final a11y = _a11y;
+    return GlassPanel(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('狀態', style: _sectionStyle(secondary)),
+          if (_backend.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              '後端：$_backend',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.2,
+                height: 1.3,
+                color: ClickSpiritColors.label(context),
+              ),
+            ),
+          ],
+          if (Platform.isLinux) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Wayland（uinput）需要輸入裝置權限：使用者需加入 input 群組，或設定 udev 規則 KERNEL=="uinput", GROUP="input", MODE="0660"。',
+              style: TextStyle(fontSize: 12, height: 1.35, color: secondary),
+            ),
+          ],
+          if (widget.enableAccessibility) ...[
+            const SizedBox(height: 4),
+            Text(
+              a11y == null
+                  ? '無障礙服務：讀取中'
+                  : a11y
+                      ? '無障礙服務：已啟用'
+                      : '無障礙服務：未啟用',
+              style: TextStyle(fontSize: 12, height: 1.35, color: secondary),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsPanel() {
+    return GlassPanel(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: Text('事件紀錄'),
+          Text('腳本設定', style: _sectionStyle(ClickSpiritColors.label(context), title: true)),
+          const SizedBox(height: 12),
+          Expanded(child: SingleChildScrollView(child: _settingsFields())),
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsFields() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final max = constraints.maxWidth;
+        final columns = max >= 460 ? 2 : 1;
+        const gap = 12.0;
+        final width = columns == 1 ? max : (max - gap) / 2;
+        Widget box(Widget child, {bool full = false}) {
+          return SizedBox(width: full || columns == 1 ? max : width, child: child);
+        }
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            box(
+              GlassTextField(controller: _name, label: '腳本名稱'),
+              full: true,
+            ),
+            box(GlassTextField(
+              controller: _repeat,
+              label: '重複次數（0 代表無限）',
+              keyboardType: TextInputType.number,
+            )),
+            box(GlassTextField(
+              controller: _defaultInterval,
+              label: '預設間隔（毫秒）',
+              keyboardType: TextInputType.number,
+            )),
+            box(GlassTextField(
+              controller: _loopInterval,
+              label: '迴圈間隔（毫秒）',
+              keyboardType: TextInputType.number,
+            )),
+            box(GlassTextField(
+              controller: _startDelay,
+              label: '開始延遲（毫秒）',
+              keyboardType: TextInputType.number,
+            )),
+            box(GlassTextField(controller: _hotkey, label: '緊急停止熱鍵')),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _stepPanel() {
+    return GlassPanel(
+      padding: const EdgeInsets.fromLTRB(6, 12, 6, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+            child: Row(
+              children: [
+                Text('步驟', style: _sectionStyle(ClickSpiritColors.label(context), title: true)),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: ClickSpiritColors.systemBlue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${_rows.length}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                      color: ClickSpiritColors.systemBlue,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           Expanded(
-            child: ListView.builder(
-              controller: _logScroll,
-              itemCount: _log.length,
-              itemBuilder: (context, index) {
-                final ev = _log[index];
-                final text = ev.message.isEmpty ? ev.kind : '${ev.kind}  ${ev.message}';
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
-                  child: Text(text, style: const TextStyle(fontSize: 12)),
-                );
-              },
+            child: StepList(
+              rows: _rows,
+              selected: _selected,
+              activeIndex: _activeStep,
+              activeRepetition: _activeRepetition,
+              onSelect: (index) => setState(() => _selected = index),
+              onEdit: _edit,
+              onDelete: _delete,
+              onDuplicate: _duplicate,
+              onReorder: _reorder,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _controlBar() {
+    final busy = _running || _recording;
+    final neutral = ClickSpiritColors.isDark(context) ? const Color(0xFFE5E5EA) : const Color(0xFF1C1C1E);
+    return GlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          GlassButton(
+            onPressed: busy ? null : _start,
+            icon: Icons.play_arrow_rounded,
+            label: '開始',
+            variant: GlassButtonVariant.filled,
+          ),
+          GlassButton(
+            onPressed: _running ? _stop : null,
+            icon: Icons.stop_rounded,
+            label: '停止',
+            variant: GlassButtonVariant.tinted,
+            color: neutral,
+          ),
+          GlassButton(
+            onPressed: _emergency,
+            icon: Icons.front_hand_outlined,
+            label: '緊急停止',
+            variant: GlassButtonVariant.destructive,
+          ),
+          GlassButton(
+            onPressed: busy ? null : _startRecording,
+            icon: Icons.fiber_manual_record_rounded,
+            label: '開始錄製',
+            variant: GlassButtonVariant.tinted,
+            color: ClickSpiritColors.systemRed,
+          ),
+          GlassButton(
+            onPressed: _recording ? _stopRecording : null,
+            icon: Icons.stop_circle_outlined,
+            label: '停止錄製',
+            variant: GlassButtonVariant.tinted,
+            color: ClickSpiritColors.systemRed,
+          ),
+          if (widget.enableCursorCapture)
+            GlassButton(
+              onPressed: busy ? null : _capture,
+              icon: Icons.my_location_outlined,
+              label: '擷取座標',
+              variant: GlassButtonVariant.tinted,
+            ),
+          if (widget.enableAccessibility)
+            GlassButton(
+              onPressed: _openA11y,
+              icon: Icons.accessibility_new_outlined,
+              label: '開啟無障礙設定',
+              variant: GlassButtonVariant.tinted,
+            ),
+          _statusChip(),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip() {
+    final color = _statusColor();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Text(
+                  _status,
+                  key: const Key('status-text'),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _statusColor() {
+    final text = _status;
+    if (text.contains('緊急') ||
+        text.contains('無法') ||
+        text.contains('失敗') ||
+        text.contains('錯誤') ||
+        text.contains('驗證')) {
+      return ClickSpiritColors.systemRed;
+    }
+    if (text.startsWith('錄製')) return ClickSpiritColors.systemRed;
+    if (text.startsWith('執行')) return ClickSpiritColors.systemGreen;
+    if (text.startsWith('已')) return ClickSpiritColors.systemBlue;
+    return ClickSpiritColors.systemGray;
+  }
+
+  Widget _logPane() {
+    final secondary = ClickSpiritColors.secondary(context);
+    final hairline = ClickSpiritColors.isDark(context)
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    return GlassPanel(
+      padding: EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _logOpen = !_logOpen),
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Row(
+                children: [
+                  Text('事件紀錄', style: _sectionStyle(ClickSpiritColors.label(context), title: true)),
+                  const Spacer(),
+                  if (_log.isNotEmpty)
+                    Text(
+                      '${_log.length}',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: secondary),
+                    ),
+                  Icon(
+                    _logOpen ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                    color: secondary,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_logOpen) ...[
+            ColoredBox(color: hairline, child: const SizedBox(height: 1)),
+            SizedBox(
+              height: 72,
+              child: _log.isEmpty
+                  ? Center(
+                      child: Text('尚無事件', style: TextStyle(fontSize: 12, color: secondary)),
+                    )
+                  : ListView.builder(
+                      controller: _logScroll,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      itemCount: _log.length,
+                      itemBuilder: (context, index) {
+                        final ev = _log[index];
+                        final text = ev.message.isEmpty ? ev.kind : '${ev.kind}  ${ev.message}';
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
+                          child: Text(
+                            text,
+                            style: TextStyle(
+                              fontFamily: 'Noto Sans Mono CJK TC',
+                              fontFamilyFallback: const [
+                                'Noto Sans Mono',
+                                'DejaVu Sans Mono',
+                                'monospace',
+                              ],
+                              fontSize: 12,
+                              height: 1.35,
+                              color: ClickSpiritColors.secondary(context),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  TextStyle _sectionStyle(Color color, {bool title = false}) {
+    return TextStyle(
+      fontSize: title ? 17 : 12,
+      fontWeight: FontWeight.w600,
+      letterSpacing: title ? -0.4 : 0,
+      height: 1.2,
+      color: color,
     );
   }
 }

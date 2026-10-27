@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart' hide Step;
 
 import '../model/script.dart';
+import 'glass.dart';
+import 'theme.dart';
 
 class StepRow {
   StepRow(this.step) : id = _nextId++;
@@ -54,7 +56,7 @@ IconData stepKindIcon(Step step) {
     case 'image':
       return Icons.image_outlined;
     default:
-      return Icons.place;
+      return Icons.place_outlined;
   }
 }
 
@@ -104,62 +106,122 @@ class StepList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (rows.isEmpty) {
-      return const Center(child: Text('尚未加入步驟'));
+      final secondary = ClickSpiritColors.secondary(context);
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app_outlined, size: 28, color: secondary),
+            const SizedBox(height: 8),
+            Text('尚未加入步驟', style: TextStyle(fontSize: 14, color: secondary, height: 1.3)),
+          ],
+        ),
+      );
     }
-    final scheme = Theme.of(context).colorScheme;
     return ReorderableListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
       itemCount: rows.length,
       onReorderItem: onReorder,
       buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) {
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final t = Curves.easeOutCubic.transform(animation.value);
+            return Transform.scale(scale: 1 + (0.015 * t), child: child);
+          },
+          child: child,
+        );
+      },
       itemBuilder: (context, index) {
         final row = rows[index];
         final step = row.step;
         final active = activeIndex == index;
         final picked = selected == index;
-        final Color? color;
+        final Color? tint;
         if (active) {
-          color = scheme.primaryContainer;
+          tint = ClickSpiritColors.systemBlue.withValues(alpha: 0.16);
         } else if (picked) {
-          color = scheme.secondaryContainer;
+          tint = ClickSpiritColors.systemBlue.withValues(alpha: 0.08);
         } else {
-          color = null;
+          tint = null;
         }
-        return Card(
+        return Padding(
           key: ValueKey(row.id),
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          color: color,
-          child: InkWell(
-            onTap: () => onSelect(index),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: GlassPanel(
+            radius: 16,
+            sigma: 12,
+            shadow: false,
+            tint: tint,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: InkWell(
+              onTap: () => onSelect(index),
+              borderRadius: BorderRadius.circular(12),
               child: Row(
                 children: [
-                  Icon(stepKindIcon(step)),
+                  _badge(index + 1, active),
+                  const SizedBox(width: 10),
+                  Icon(stepKindIcon(step), size: 18, color: ClickSpiritColors.secondary(context)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('步驟 ${index + 1}', key: ValueKey('step-title-$index')),
-                        Text(stepWhere(step), key: ValueKey('step-summary-$index')),
-                        Text(stepDetails(step)),
-                        if (active)
-                          Text(
-                            '第 ${activeRepetition + 1}/${step.effectiveRepeat} 次',
-                            key: const ValueKey('running-repetition'),
+                        Text(
+                          '步驟 ${index + 1}',
+                          key: ValueKey('step-title-$index'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.3,
+                            height: 1.25,
+                            color: ClickSpiritColors.label(context),
                           ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          stepWhere(step),
+                          key: ValueKey('step-summary-$index'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.3,
+                            color: ClickSpiritColors.secondary(context),
+                          ),
+                        ),
+                        Text(
+                          stepDetails(step),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            height: 1.3,
+                            color: ClickSpiritColors.systemGray,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  _action('編輯', Icons.edit, () => onEdit(index)),
-                  _action('複製', Icons.copy, () => onDuplicate(index)),
-                  _action('刪除', Icons.delete, () => onDelete(index)),
+                  if (active) ...[
+                    const SizedBox(width: 6),
+                    _repetitionBadge(activeRepetition + 1, step.effectiveRepeat),
+                  ],
+                  _action('編輯', Icons.edit_outlined, ClickSpiritColors.secondary(context), () => onEdit(index)),
+                  _action('複製', Icons.content_copy_outlined, ClickSpiritColors.secondary(context), () => onDuplicate(index)),
+                  _action('刪除', Icons.delete_outline, ClickSpiritColors.systemRed, () => onDelete(index)),
                   ReorderableDragStartListener(
                     index: index,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(Icons.drag_handle, key: ValueKey('drag-$index')),
+                      child: Icon(
+                        Icons.drag_handle_rounded,
+                        key: ValueKey('drag-$index'),
+                        color: ClickSpiritColors.tertiary(context),
+                      ),
                     ),
                   ),
                 ],
@@ -171,12 +233,55 @@ class StepList extends StatelessWidget {
     );
   }
 
-  Widget _action(String tooltip, IconData icon, VoidCallback onPressed) {
+  Widget _badge(int number, bool active) {
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: active ? ClickSpiritColors.systemBlue : ClickSpiritColors.systemBlue.withValues(alpha: 0.12),
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        '$number',
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          height: 1,
+          color: active ? Colors.white : ClickSpiritColors.systemBlue,
+        ),
+      ),
+    );
+  }
+
+  Widget _repetitionBadge(int current, int total) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: ClickSpiritColors.systemBlue,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '第 $current/$total 次',
+        key: const ValueKey('running-repetition'),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+
+  Widget _action(String tooltip, IconData icon, Color color, VoidCallback onPressed) {
     return IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
       visualDensity: VisualDensity.compact,
-      icon: Icon(icon, size: 20),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      icon: Icon(icon, size: 18, color: color),
     );
   }
 }

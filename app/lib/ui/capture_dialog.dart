@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'capture_mapping.dart';
+import 'glass.dart';
+import 'theme.dart';
 
 enum CapturePickMode { point, circle, rect }
 
@@ -223,115 +225,150 @@ class _CaptureScreenPageState extends State<CaptureScreenPage> {
   Widget build(BuildContext context) {
     final image = _image;
     final imageSize = _imageSize;
+    final secondary = ClickSpiritColors.secondary(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_title),
-        actions: [
-          Row(
-            children: [
-              const Text('平移'),
-              Switch(
-                value: _pan,
-                onChanged: (value) => setState(() => _pan = value),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Text(_hint),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-                _viewport = viewport;
-                if (image == null || imageSize == null) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final fit = containFit(viewport, imageSize);
-                return InteractiveViewer(
-                  constrained: true,
-                  panEnabled: _pan,
-                  scaleEnabled: true,
-                  minScale: 1,
-                  maxScale: 8,
-                  child: Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerDown: _pan
-                        ? null
-                        : (event) {
-                            _press = event.localPosition;
-                            _drag(event.localPosition);
-                          },
-                    onPointerMove: _pan
-                        ? null
-                        : (event) {
-                            final origin = _press;
-                            if (origin == null) return;
-                            _drag(event.localPosition, from: origin);
-                          },
-                    onPointerUp: _pan
-                        ? null
-                        : (event) {
-                            final origin = _press;
-                            _press = null;
-                            if (origin == null) return;
-                            _drag(event.localPosition, from: origin);
-                          },
-                    child: CustomPaint(
-                      painter: _CapturePainter(
-                        image: image,
-                        fit: fit,
-                        point: widget.mode == CapturePickMode.point ? _offset(_x, _y) : null,
-                        circleCenter: widget.mode == CapturePickMode.circle ? _offset(_cx, _cy) : null,
-                        circleRadius: widget.mode == CapturePickMode.circle ? double.tryParse(_r.text.trim()) : null,
-                        rect: widget.mode == CapturePickMode.rect ? _rect() : null,
+      backgroundColor: const Color(0xFF0B0D12),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+                  _viewport = viewport;
+                  if (image == null || imageSize == null) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final fit = containFit(viewport, imageSize);
+                  return InteractiveViewer(
+                    constrained: true,
+                    panEnabled: _pan,
+                    scaleEnabled: true,
+                    minScale: 1,
+                    maxScale: 8,
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: _pan
+                          ? null
+                          : (event) {
+                              _press = event.localPosition;
+                              _drag(event.localPosition);
+                            },
+                      onPointerMove: _pan
+                          ? null
+                          : (event) {
+                              final origin = _press;
+                              if (origin == null) return;
+                              _drag(event.localPosition, from: origin);
+                            },
+                      onPointerUp: _pan
+                          ? null
+                          : (event) {
+                              final origin = _press;
+                              _press = null;
+                              if (origin == null) return;
+                              _drag(event.localPosition, from: origin);
+                            },
+                      child: CustomPaint(
+                        painter: _CapturePainter(
+                          image: image,
+                          fit: fit,
+                          point: widget.mode == CapturePickMode.point ? _offset(_x, _y) : null,
+                          circleCenter: widget.mode == CapturePickMode.circle ? _offset(_cx, _cy) : null,
+                          circleRadius: widget.mode == CapturePickMode.circle ? double.tryParse(_r.text.trim()) : null,
+                          rect: widget.mode == CapturePickMode.rect ? _rect() : null,
+                        ),
+                        child: const SizedBox.expand(),
                       ),
-                      child: const SizedBox.expand(),
                     ),
-                  ),
-                );
-              },
-            ),
-          ),
-          Material(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _fields(),
-                  if (_formError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(_formError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                    ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
-                      const SizedBox(width: 8),
-                      FilledButton(onPressed: image == null ? null : _confirm, child: const Text('確定')),
-                    ],
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          ),
-        ],
+            Positioned(
+              top: 12,
+              left: 16,
+              right: 16,
+              child: GlassPanel(
+                radius: 18,
+                padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: '關閉',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _title,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.3,
+                              height: 1.2,
+                              color: ClickSpiritColors.label(context),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(_hint, style: TextStyle(fontSize: 12, height: 1.35, color: secondary)),
+                          if (_error != null)
+                            Text(_error!, style: const TextStyle(fontSize: 12, height: 1.35, color: ClickSpiritColors.systemRed)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('平移', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: secondary)),
+                    Switch(
+                      value: _pan,
+                      onChanged: (value) => setState(() => _pan = value),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 12,
+              child: GlassPanel(
+                radius: 20,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _fields(),
+                    if (_formError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          _formError!,
+                          style: const TextStyle(color: ClickSpiritColors.systemRed, fontSize: 13),
+                        ),
+                      ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+                        const SizedBox(width: 8),
+                        GlassButton(
+                          onPressed: image == null ? null : _confirm,
+                          label: '確定',
+                          variant: GlassButtonVariant.primary,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -390,15 +427,11 @@ class _CaptureScreenPageState extends State<CaptureScreenPage> {
   Widget _box(TextEditingController controller, String label) {
     return SizedBox(
       width: 120,
-      child: TextField(
+      child: GlassTextField(
         controller: controller,
+        label: label,
         keyboardType: TextInputType.number,
         onChanged: (_) => setState(() => _formError = null),
-        decoration: InputDecoration(
-          labelText: label,
-          isDense: true,
-          border: const OutlineInputBorder(),
-        ),
       ),
     );
   }
@@ -423,7 +456,7 @@ class _CapturePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF202124));
+    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF0B0D12));
     if (fit.scale == 0) return;
     canvas.drawImageRect(
       image,
@@ -431,22 +464,39 @@ class _CapturePainter extends CustomPainter {
       fit.dest,
       Paint()..filterQuality = FilterQuality.medium,
     );
+    const accent = ClickSpiritColors.systemBlue;
     final stroke = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = const Color(0xFF00E5FF);
+      ..strokeCap = StrokeCap.round
+      ..color = accent;
+    final halo = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xE6FFFFFF);
     final fill = Paint()
       ..style = PaintingStyle.fill
-      ..color = const Color(0x3300E5FF);
+      ..color = accent.withValues(alpha: 0.22);
+    final scrim = Paint()..color = const Color(0x66000000);
+
     final center = circleCenter;
     final radius = circleRadius;
     if (center != null) {
       final c = imageToWidget(center, fit);
-      if (radius != null && radius > 0) {
-        final drawn = radius * fit.scale;
+      final drawn = (radius != null && radius > 0) ? radius * fit.scale : 0.0;
+      final hole = drawn > 0 ? drawn : 10.0;
+      final path = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(Offset.zero & size)
+        ..addOval(Rect.fromCircle(center: c, radius: hole));
+      canvas.drawPath(path, scrim);
+      if (drawn > 0) {
         canvas.drawCircle(c, drawn, fill);
+        canvas.drawCircle(c, drawn, halo);
         canvas.drawCircle(c, drawn, stroke);
       }
+      canvas.drawCircle(c, 4, halo);
       canvas.drawCircle(c, 4, stroke);
     }
     final box = rect;
@@ -454,13 +504,27 @@ class _CapturePainter extends CustomPainter {
       final a = imageToWidget(box.topLeft, fit);
       final b = imageToWidget(box.bottomRight, fit);
       final drawn = Rect.fromPoints(a, b);
+      final path = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(Offset.zero & size)
+        ..addRect(drawn);
+      canvas.drawPath(path, scrim);
       canvas.drawRect(drawn, fill);
+      canvas.drawRect(drawn, halo);
       canvas.drawRect(drawn, stroke);
     }
     final mark = point;
     if (mark != null) {
       final c = imageToWidget(mark, fit);
+      final path = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(Offset.zero & size)
+        ..addOval(Rect.fromCircle(center: c, radius: 22));
+      canvas.drawPath(path, scrim);
+      canvas.drawCircle(c, 5, halo);
       canvas.drawCircle(c, 5, stroke);
+      canvas.drawLine(Offset(c.dx - 12, c.dy), Offset(c.dx + 12, c.dy), halo);
+      canvas.drawLine(Offset(c.dx, c.dy - 12), Offset(c.dx, c.dy + 12), halo);
       canvas.drawLine(Offset(c.dx - 12, c.dy), Offset(c.dx + 12, c.dy), stroke);
       canvas.drawLine(Offset(c.dx, c.dy - 12), Offset(c.dx, c.dy + 12), stroke);
     }

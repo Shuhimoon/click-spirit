@@ -9,7 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import '../engine/click_engine.dart';
 import '../model/script.dart';
 import 'capture_dialog.dart';
+import 'glass.dart';
 import 'png_crop.dart';
+import 'theme.dart';
 
 Future<Step?> showStepEditor(
   BuildContext context, {
@@ -18,6 +20,7 @@ Future<Step?> showStepEditor(
 }) {
   return showDialog<Step>(
     context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.28),
     builder: (context) => StepEditorDialog(initial: initial, engine: engine),
   );
 }
@@ -342,101 +345,143 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final width = math.min(560.0, math.max(280.0, MediaQuery.sizeOf(context).width - 80));
-    return AlertDialog(
-      title: Text(widget.initial == null ? '新增步驟' : '編輯步驟'),
-      content: SizedBox(
-        width: width,
-        child: SingleChildScrollView(
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.86;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width, maxHeight: maxHeight),
+        child: GlassPanel(
+          radius: 24,
+          padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'point', label: Text('定點')),
-                  ButtonSegment(value: 'circle', label: Text('圓形')),
-                  ButtonSegment(value: 'image', label: Text('找圖')),
-                ],
-                selected: {_kind},
-                onSelectionChanged: (next) => setState(() => _kind = next.first),
-              ),
-              const SizedBox(height: 12),
-              if (_kind == 'point') ..._pointFields(),
-              if (_kind == 'circle') ..._circleFields(),
-              if (_kind == 'image') ..._imageFields(),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: _button,
-                decoration: const InputDecoration(labelText: '按鍵'),
-                items: const [
-                  DropdownMenuItem(value: 'left', child: Text('左鍵')),
-                  DropdownMenuItem(value: 'right', child: Text('右鍵')),
-                  DropdownMenuItem(value: 'middle', child: Text('中鍵')),
-                ],
-                onChanged: (value) => setState(() => _button = value ?? 'left'),
-              ),
-              DropdownButtonFormField<int>(
-                initialValue: _clicks,
-                decoration: const InputDecoration(labelText: '點擊次數'),
-                items: const [
-                  DropdownMenuItem(value: 1, child: Text('1')),
-                  DropdownMenuItem(value: 2, child: Text('2')),
-                  DropdownMenuItem(value: 3, child: Text('3')),
-                ],
-                onChanged: (value) => setState(() => _clicks = value ?? 1),
-              ),
-              TextField(
-                controller: _interval,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '間隔（毫秒，0 表示用預設）'),
-              ),
-              TextField(
-                controller: _hold,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '按住（毫秒）'),
-              ),
-              TextField(
-                controller: _repeat,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '重複次數（0 或 1 代表一次）'),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                widget.initial == null ? '新增步驟' : '編輯步驟',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.4,
+                  height: 1.25,
+                  color: ClickSpiritColors.label(context),
                 ),
+              ),
+              const SizedBox(height: 14),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'point', label: Text('定點')),
+                          ButtonSegment(value: 'circle', label: Text('圓形')),
+                          ButtonSegment(value: 'image', label: Text('找圖')),
+                        ],
+                        selected: {_kind},
+                        onSelectionChanged: (next) => setState(() => _kind = next.first),
+                      ),
+                      const SizedBox(height: 14),
+                      if (_kind == 'point') ..._pointFields(),
+                      if (_kind == 'circle') ..._circleFields(),
+                      if (_kind == 'image') ..._imageFields(),
+                      const SizedBox(height: 10),
+                      GlassDropdownField<String>(
+                        label: '按鍵',
+                        value: _button,
+                        items: const [
+                          DropdownMenuItem(value: 'left', child: Text('左鍵')),
+                          DropdownMenuItem(value: 'right', child: Text('右鍵')),
+                          DropdownMenuItem(value: 'middle', child: Text('中鍵')),
+                        ],
+                        onChanged: (value) => setState(() => _button = value ?? 'left'),
+                      ),
+                      const SizedBox(height: 10),
+                      GlassDropdownField<int>(
+                        label: '點擊次數',
+                        value: _clicks,
+                        items: const [
+                          DropdownMenuItem(value: 1, child: Text('1')),
+                          DropdownMenuItem(value: 2, child: Text('2')),
+                          DropdownMenuItem(value: 3, child: Text('3')),
+                        ],
+                        onChanged: (value) => setState(() => _clicks = value ?? 1),
+                      ),
+                      const SizedBox(height: 10),
+                      GlassTextField(
+                        controller: _interval,
+                        keyboardType: TextInputType.number,
+                        label: '間隔（毫秒，0 表示用預設）',
+                      ),
+                      const SizedBox(height: 10),
+                      GlassTextField(
+                        controller: _hold,
+                        keyboardType: TextInputType.number,
+                        label: '按住（毫秒）',
+                      ),
+                      const SizedBox(height: 10),
+                      GlassTextField(
+                        controller: _repeat,
+                        keyboardType: TextInputType.number,
+                        label: '重複次數（0 或 1 代表一次）',
+                      ),
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(_error!, style: const TextStyle(color: ClickSpiritColors.systemRed, fontSize: 13)),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
+                  const SizedBox(width: 8),
+                  GlassButton(
+                    onPressed: _busy ? null : _submit,
+                    label: '確定',
+                    variant: GlassButtonVariant.primary,
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
-        FilledButton(onPressed: _busy ? null : _submit, child: const Text('確定')),
-      ],
     );
   }
 
   List<Widget> _pointFields() {
     return [
-      TextField(
-        key: const Key('point-x'),
+      GlassTextField(
+        fieldKey: const Key('point-x'),
         controller: _x,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: 'X 座標'),
+        label: 'X 座標',
       ),
-      TextField(
-        key: const Key('point-y'),
+      const SizedBox(height: 10),
+      GlassTextField(
+        fieldKey: const Key('point-y'),
         controller: _y,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: 'Y 座標'),
+        label: 'Y 座標',
       ),
+      const SizedBox(height: 10),
       Align(
         alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
+        child: GlassButton(
           onPressed: _busy ? null : () => _pickOnScreen(CapturePickMode.point),
-          icon: const Icon(Icons.screenshot_monitor),
-          label: const Text('從螢幕點選座標'),
+          icon: Icons.screenshot_monitor_outlined,
+          label: '從螢幕點選座標',
+          variant: GlassButtonVariant.tinted,
         ),
       ),
     ];
@@ -444,30 +489,34 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
 
   List<Widget> _circleFields() {
     return [
-      TextField(
-        key: const Key('circle-cx'),
+      GlassTextField(
+        fieldKey: const Key('circle-cx'),
         controller: _cx,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '圓心 X'),
+        label: '圓心 X',
       ),
-      TextField(
-        key: const Key('circle-cy'),
+      const SizedBox(height: 10),
+      GlassTextField(
+        fieldKey: const Key('circle-cy'),
         controller: _cy,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '圓心 Y'),
+        label: '圓心 Y',
       ),
-      TextField(
-        key: const Key('circle-r'),
+      const SizedBox(height: 10),
+      GlassTextField(
+        fieldKey: const Key('circle-r'),
         controller: _r,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '半徑'),
+        label: '半徑',
       ),
+      const SizedBox(height: 10),
       Align(
         alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
+        child: GlassButton(
           onPressed: _busy ? null : () => _pickOnScreen(CapturePickMode.circle),
-          icon: const Icon(Icons.circle_outlined),
-          label: const Text('從螢幕擷取設定圓形'),
+          icon: Icons.circle_outlined,
+          label: '從螢幕擷取設定圓形',
+          variant: GlassButtonVariant.tinted,
         ),
       ),
     ];
@@ -475,32 +524,36 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
 
   List<Widget> _imageFields() {
     return [
-      TextField(
+      GlassTextField(
         controller: _template,
-        decoration: const InputDecoration(labelText: '模板路徑'),
+        label: '模板路徑',
         onChanged: (_) {
           _templateB64 = '';
           _matchText = null;
         },
       ),
+      const SizedBox(height: 10),
       Wrap(
         spacing: 8,
         runSpacing: 8,
         children: [
-          OutlinedButton.icon(
+          GlassButton(
             onPressed: _busy ? null : _pickPng,
-            icon: const Icon(Icons.file_open),
-            label: const Text('選擇 PNG'),
+            icon: Icons.file_open_outlined,
+            label: '選擇 PNG',
+            variant: GlassButtonVariant.tinted,
           ),
-          OutlinedButton.icon(
+          GlassButton(
             onPressed: _busy ? null : () => _pickOnScreen(CapturePickMode.rect),
-            icon: const Icon(Icons.crop),
-            label: const Text('從螢幕裁切'),
+            icon: Icons.crop_outlined,
+            label: '從螢幕裁切',
+            variant: GlassButtonVariant.tinted,
           ),
-          FilledButton.tonalIcon(
+          GlassButton(
             onPressed: _busy ? null : _testMatch,
-            icon: const Icon(Icons.search),
-            label: const Text('測試比對'),
+            icon: Icons.search_rounded,
+            label: '測試比對',
+            variant: GlassButtonVariant.primary,
           ),
         ],
       ),
@@ -509,14 +562,16 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
           padding: const EdgeInsets.only(top: 8),
           child: Text(_matchText!),
         ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _threshold,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: const InputDecoration(labelText: '門檻（0 到 1，0 代表 0.9）'),
+        label: '門檻（0 到 1，0 代表 0.9）',
       ),
-      DropdownButtonFormField<String>(
-        initialValue: _onNotFound,
-        decoration: const InputDecoration(labelText: '找不到時'),
+      const SizedBox(height: 10),
+      GlassDropdownField<String>(
+        label: '找不到時',
+        value: _onNotFound,
         items: const [
           DropdownMenuItem(value: '', child: Text('略過')),
           DropdownMenuItem(value: 'wait', child: Text('等待')),
@@ -524,45 +579,53 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
         ],
         onChanged: (value) => setState(() => _onNotFound = value ?? ''),
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _timeout,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '逾時（毫秒）'),
+        label: '逾時（毫秒）',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _poll,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '輪詢（毫秒，0 代表 100）'),
+        label: '輪詢（毫秒，0 代表 100）',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _offsetX,
         keyboardType: const TextInputType.numberWithOptions(signed: true),
-        decoration: const InputDecoration(labelText: '偏移 X'),
+        label: '偏移 X',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _offsetY,
         keyboardType: const TextInputType.numberWithOptions(signed: true),
-        decoration: const InputDecoration(labelText: '偏移 Y'),
+        label: '偏移 Y',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _regionX,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '搜尋範圍 X'),
+        label: '搜尋範圍 X',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _regionY,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '搜尋範圍 Y'),
+        label: '搜尋範圍 Y',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _regionW,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '搜尋範圍寬（0 代表全畫面）'),
+        label: '搜尋範圍寬（0 代表全畫面）',
       ),
-      TextField(
+      const SizedBox(height: 10),
+      GlassTextField(
         controller: _regionH,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: '搜尋範圍高（0 代表全畫面）'),
+        label: '搜尋範圍高（0 代表全畫面）',
       ),
     ];
   }

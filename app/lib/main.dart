@@ -6,6 +6,7 @@ import 'engine/channel_click_engine.dart';
 import 'engine/click_engine.dart';
 import 'engine/ffi_click_engine.dart';
 import 'ui/home_page.dart';
+import 'ui/theme.dart';
 
 Future<void> main() async {
   final ClickEngine engine;
@@ -44,10 +45,9 @@ class ClickSpiritApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '點擊精靈',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F6B4C)),
-        useMaterial3: true,
-      ),
+      theme: ClickSpiritTheme.light(),
+      darkTheme: ClickSpiritTheme.dark(),
+      themeMode: ThemeMode.system,
       home: HomePage(
         engine: engine,
         enableCursorCapture: !Platform.isAndroid,
