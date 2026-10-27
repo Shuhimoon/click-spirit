@@ -119,17 +119,31 @@ click-spirit/
 
 ### 錄製與回放
 
-`core/record` 收時間戳事件（move、down、up、click）。平台的全域滑鼠鉤子還沒接上，`platform.NewInputSource` 會回傳尚未實作；測試與程式可以用 `Recorder.Add`，或讓引擎的 `StartRecordingWith` 吃一個假的 `InputSource`。
+`core/record` 收時間戳事件（move、down、up、click）。`platform.NewInputSource` 在 Linux 上接全域鉤子，其他作業系統仍回傳尚未實作。測試也可以用 `Recorder.Add`，或讓引擎的 `StartRecordingWith` 吃一個假的 `InputSource`。
 
-轉換規則：移動略過。同一鍵的 down 加 up 合成一次點擊，`hold_ms` 是按住的時間，座標用按下的位置。連續點擊若同鍵、起點間隔在雙擊窗內（預設 300 毫秒，負值關閉）、位移在容許範圍（預設 3 像素），會併成 `clicks` 2 或 3。步驟間隔是這次放開到下次按下，再除以速度（`<=0` 當 1），然後不低於最短間隔。雙擊內部的空隙不會保留。回放就是把產生的腳本交給 `Runner`。FFI 的 `CS_StartRecording` 在鉤子未實作時回傳 `{"error":...}`；`CS_StopRecording` 成功時回傳腳本 JSON。
+Linux 怎麼選：
+
+| 條件 | 錄製 |
+| --- | --- |
+| 點擊後端是 X11（`DISPLAY` 有設、X11 有編進來、沒有強制 uinput），而且伺服器有 RECORD | `XRecord` |
+| 否則 | evdev，讀 `/dev/input/event*` |
+
+X11 開兩條 Display：控制連線建立 context，資料連線 `XRecordEnableContextAsync`。範圍是 `XRecordAllClients` 的 `ButtonPress`、`ButtonRelease`、`MotionNotify`。座標用 `xEvent.u.keyButtonPointer` 的 rootX/rootY。按鈕 1/2/3 是左/中/右，4–7（滾輪）略過。時間用送達當下的 `time.Now()`。我們自己的 XTest 回放也會被記下來，程式沒有把那些事件濾掉；錄製時若同時在播放，播放的點擊會進腳本。
+
+Wayland 或沒有 RECORD 時走 evdev。指標裝置要有 `BTN_LEFT`。evdev 的滑鼠只有相對位移，起點用 X11 後端的游標（後端不是 X11 或讀不到時是 0,0），再累加 `REL_X`/`REL_Y`，已知螢幕大小就夾在範圍內。觸控板的 `EV_ABS` 用 `EVIOCGABS` 的最小/最大縮放到 `CLICK_SPIRIT_SCREEN`；沒設螢幕大小時，座標只是裝置值減掉最小值。**Wayland 上的座標是近似值。** 讀取被拒（`EACCES`）時，錯誤會包住 `ErrUnsupported`，並說明使用者要加入 `input` 群組。
+
+熱鍵在 Linux 上同樣二選一：X11 連得上就繼續用 `XGrabKey`；否則 evdev 看有 `KEY_F1`–`KEY_F12` 的鍵盤，追蹤左右 Ctrl、Shift、Alt、Super，只在按下（不是連發）且修飾鍵完全符合時觸發。`CGO_ENABLED=0` 或 `-tags nox11` 沒有 X11，熱鍵與錄製都走 evdev。
+
+轉換規則：移動略過。同一鍵的 down 加 up 合成一次點擊，`hold_ms` 是按住的時間，座標用按下的位置。連續點擊若同鍵、起點間隔在雙擊窗內（預設 300 毫秒，負值關閉）、位移在容許範圍（預設 3 像素），會併成 `clicks` 2 或 3。步驟間隔是這次放開到下次按下，再除以速度（`<=0` 當 1），然後不低於最短間隔。雙擊內部的空隙不會保留。回放就是把產生的腳本交給 `Runner`。FFI 的 `CS_StartRecording` 失敗時回傳 `{"error":...}`，成功是 `{"ok":true}`。`CS_StopRecording` 成功時回傳腳本 JSON。
 
 ### 緊急停止的平台實作
 
-- Linux（cgo 且沒有 `-tags nox11`）：另一條 Display 連線上 `XGrabKey`，事件迴圈在自己的 goroutine。Caps Lock 與 Num Lock 的組合會一併抓住。
+- Linux，X11 連得上（cgo 且沒有 `-tags nox11`，`DISPLAY` 開得起來）：另一條 Display 連線上 `XGrabKey`，事件迴圈在自己的 goroutine。Caps Lock 與 Num Lock 的組合會一併抓住。
+- Linux，X11 不可用：evdev 鍵盤。使用者要在 `input` 群組才能讀 `/dev/input/event*`。
 - Windows：`RegisterHotKey` 加鎖定 OS 執行緒的訊息迴圈。
 - macOS：尚未實作。需要 `CGEventTap` 與輔助使用權限。
 - Android：沒有全域熱鍵。`mobile.EmergencyStop` 給懸浮按鈕用。
-- `CGO_ENABLED=0` 或 `-tags nox11` 的 Linux 建置不含 X11 熱鍵。
+- `CGO_ENABLED=0` 或 `-tags nox11` 的 Linux 建置不含 X11，熱鍵改走 evdev。
 
 指令列：
 
@@ -175,7 +189,7 @@ go build -buildmode=c-shared -o /tmp/libcs.so ./ffi
 xvfb-run -a -s "-screen 0 1280x800x24" env CLICK_SPIRIT_X11_TEST=1 go test ./platform -run X11 -v
 ```
 
-`go test` 預設不會移動游標。X11 整合測試要另外設 `CLICK_SPIRIT_X11_TEST=1`，而且只應該在 `xvfb-run` 底下跑。`CGO_ENABLED=0` 或 `-tags nox11` 不會編進 X11，這時有 `WAYLAND_DISPLAY`、或 X11 沒有編進來，就改走 uinput。Android 請改用 `mobile` 套件。
+`go test` 預設不會移動游標。會送 XTest 的測試（點擊、截圖、`XGrabKey`、`XRecord`）只應該在 `xvfb-run` 底下跑，而且程式會拒絕 `:7`、`:14`、`:15`、`:17`。舊的 X11 點擊與熱鍵測試還要 `CLICK_SPIRIT_X11_TEST=1`。`XRecord` 錄製測試在 `DISPLAY` 為空或沒有 RECORD 時跳過。`CGO_ENABLED=0` 或 `-tags nox11` 不會編進 X11，這時有 `WAYLAND_DISPLAY`、或 X11 沒有編進來，就改走 uinput；錄製與熱鍵改走 evdev。Android 請改用 `mobile` 套件。
 
 ### Flutter 外殼
 
@@ -274,14 +288,14 @@ AAR 輸出到 `app/android/app/libs/clickspirit.aar`。Java 套件是 `com.click
 
 - **Windows**：輸入走 `SendInput`。完整性較高的視窗（例如以系統管理員身分執行的程式）會被 UIPI 擋住，一般權限的行程點不到。多螢幕座標以虛擬桌面（`SM_XVIRTUALSCREEN` 到 `SM_CYVIRTUALSCREEN`）歸一化。程式會盡量開啟 per-monitor DPI awareness。
 - **macOS**：需要「輔助使用」權限，`AXIsProcessTrusted` 為假時事件不會送到其他 App。App Sandbox 必須關閉（`com.apple.security.app-sandbox` = false）。
-- **Linux / X11**：行程要連得上 `DISPLAY`，X 伺服器要有 XTest。這條路徑會真的移動該顯示器上的游標。請只對自己的 X 伺服器送事件；開發時用 `xvfb-run` 開私人畫面。
-- **Linux / Wayland（uinput）**：要能寫 `/dev/uinput`。使用者需加入 `input` 群組，或設定 udev 規則：
+- **Linux / X11**：行程要連得上 `DISPLAY`，X 伺服器要有 XTest。錄製還要 RECORD。這條路徑會真的移動該顯示器上的游標，也聽得到全螢幕的指標事件。請只對自己的 X 伺服器送事件；開發時用 `xvfb-run` 開私人畫面。
+- **Linux / Wayland（uinput 與 evdev）**：送出點擊要能寫 `/dev/uinput`。錄製與緊急停止熱鍵要能讀 `/dev/input/event*`。兩者通常都要求使用者加入 `input` 群組。uinput 還可以設定 udev 規則：
 
   ```
   KERNEL=="uinput", GROUP="input", MODE="0660"
   ```
 
-  規則放進 `/etc/udev/rules.d/99-uinput.rules` 後重新載入 udev，或重新登入讓群組生效。沒有這個權限時，開裝置會失敗。座標範圍要設 `CLICK_SPIRIT_SCREEN=WxH`。在同時有 `DISPLAY` 與 `WAYLAND_DISPLAY` 的 XWayland 環境，預設仍走 X11。
+  規則放進 `/etc/udev/rules.d/99-uinput.rules` 後重新載入 udev，或重新登入讓群組生效。沒有這個權限時，開裝置會失敗，錄製錯誤會說明要加入 `input` 群組。座標範圍要設 `CLICK_SPIRIT_SCREEN=WxH`。evdev 在 Wayland 上的座標是近似值。在同時有 `DISPLAY` 與 `WAYLAND_DISPLAY` 的 XWayland 環境，點擊、錄製與熱鍵預設仍走 X11。
 - **Android**：使用者要在系統設定裡啟用「點擊精靈」無障礙服務，且服務宣告 `canPerformGestures`。點擊是 `GestureDescription` 的點下手勢，不區分滑鼠左右鍵。清單裡已預留 `FOREGROUND_SERVICE` 與 `FOREGROUND_SERVICE_MEDIA_PROJECTION`，供之後的截圖使用；目前的 `ScreenCaptureHelper` 只有接上與釋放 MediaProjection 的空殼。
 
 介面是繁體中文。步驟可以新增、編輯、刪除、拖曳排序。桌面的「擷取座標」會倒數 3 秒再讀游標。Android 提供「開啟無障礙設定」與啟用狀態。腳本用系統檔案選擇器開啟與儲存。
@@ -293,11 +307,11 @@ AAR 輸出到 `app/android/app/libs/clickspirit.aar`。Java 套件是 `com.click
 還沒有定案的部分：
 
 - 桌面事件要繼續用 FFI 輪詢 `CS_PollEvent`，還是改成 `NativeCallable` 由 Go 直接回呼 Dart。
-- macOS 全域熱鍵仍缺 `CGEventTap`（需要輔助使用權限）。Linux X11 用 `XGrabKey`，Windows 用 `RegisterHotKey`，Android 用 `EmergencyStop`。
+- macOS 全域熱鍵仍缺 `CGEventTap`（需要輔助使用權限）。Linux 有 X11 時用 `XGrabKey`，否則用 evdev。Windows 用 `RegisterHotKey`，Android 用 `EmergencyStop`。
 - Android 座標擷取要用懸浮窗，還是用 MediaProjection 截圖後讓使用者點選。找圖本體已可吃 Kotlin 傳來的 PNG。
 - DPI 與多螢幕的座標縮放還沒有完整規格。腳本目前要求 X、Y 大於等於 0，虛擬桌面原點為負的螢幕會點不到。
 - 程式碼簽章與公證的發佈流程（macOS notarize、Windows 簽章）還沒有自動化。
 - 截圖：Linux X11 已能截全螢幕（`CS_CaptureScreenPNG`）。Windows、macOS、Android 的 `core.ScreenCapturer` 仍未實作。找圖演算法在 `core/imagematch`，有截圖就能跑。不支援縮放與旋轉。
-- 錄製的平台鉤子（滑鼠全域監聽）還沒做。事件轉腳本與回放已可用。
-- Wayland 下的座標與截圖：uinput 只能送出絕對座標，讀不到游標，也不能截圖。之後可走 xdg-desktop-portal 的 RemoteDesktop（輸入）與 ScreenCast（截圖）。
+- 錄製在 Linux 已接上（X11 `XRecord`，否則 evdev）。Windows 與 macOS 的全域滑鼠鉤子還沒做。事件轉腳本與回放已可用。
+- Wayland 下的座標與截圖：uinput 只能送出絕對座標，讀不到游標，也不能截圖。錄製改讀 evdev，座標是近似值。之後可走 xdg-desktop-portal 的 RemoteDesktop（輸入）與 ScreenCast（截圖）。
 - uinput 絕對座標與多螢幕：裝置範圍來自 `CLICK_SPIRIT_SCREEN` 或 `NewUinput`，尚未對應多螢幕原點與縮放。
