@@ -40,3 +40,11 @@ app/linux/libs/*
 !app/linux/libs/.gitkeep
 app/android/app/libs/*
 !app/android/app/libs/.gitkeep
+
+# Packaged apps / mobile bindings
+*.apk
+*.aab
+*.ipa
+*.xcframework/
+*.dmg
+*.msix
