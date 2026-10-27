@@ -8,6 +8,8 @@ package main
 import "C"
 
 import (
+	"image/png"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -120,6 +122,36 @@ func CS_AccessibilityTrusted() C.int {
 		return 1
 	}
 	return 0
+}
+
+//export CS_Backend
+func CS_Backend() *C.char {
+	return cString(platform.Name())
+}
+
+//export CS_CaptureScreenPNG
+func CS_CaptureScreenPNG(path *C.char) *C.char {
+	p := goString(path)
+	if p == "" {
+		return cString("empty path")
+	}
+	img, err := shared().Capture()
+	if err != nil {
+		return cString(err.Error())
+	}
+	f, err := os.Create(p)
+	if err != nil {
+		return cString(err.Error())
+	}
+	encErr := png.Encode(f, img)
+	closeErr := f.Close()
+	if encErr != nil {
+		return cString(encErr.Error())
+	}
+	if closeErr != nil {
+		return cString(closeErr.Error())
+	}
+	return cString("")
 }
 
 //export CS_FreeString

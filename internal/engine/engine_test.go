@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
 	"sync"
 	"testing"
 	"time"
@@ -182,6 +183,36 @@ func TestEngineDropsOldest(t *testing.T) {
 	}
 	if _, ok := e.PollEvent(); ok {
 		t.Fatal("queue not empty")
+	}
+}
+
+type capClicker struct {
+	fakeClicker
+	img image.Image
+	err error
+}
+
+func (c *capClicker) Capture() (image.Image, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.img, nil
+}
+
+func TestEngineCapture(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 3))
+	e := New(&capClicker{img: img}, nil)
+	got, err := e.Capture()
+	if err != nil || got.Bounds().Dx() != 2 || got.Bounds().Dy() != 3 {
+		t.Fatalf("img %v err %v", got, err)
+	}
+	plain := New(&fakeClicker{}, nil)
+	if _, err := plain.Capture(); !errors.Is(err, ErrCaptureUnsupported) {
+		t.Fatal(err)
+	}
+	none := New(nil, errors.New("no desktop"))
+	if _, err := none.Capture(); err == nil || err.Error() != "no desktop" {
+		t.Fatal(err)
 	}
 }
 

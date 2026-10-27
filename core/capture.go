@@ -3,7 +3,8 @@ package core
 import "image"
 
 // ScreenCapturer captures the screen for a future image-match clicker.
-// Platform packages do not implement it yet.
+// The Linux X11 backend implements it. Windows, macOS, Android, and the
+// Linux uinput backend do not.
 type ScreenCapturer interface {
 	Capture() (image.Image, error)
 }

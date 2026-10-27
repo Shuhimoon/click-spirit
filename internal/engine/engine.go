@@ -7,11 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
 	"sync"
 	"time"
 
 	"github.com/click-spirit/click-spirit/core"
 )
+
+// ErrCaptureUnsupported is returned when the clicker cannot capture the screen.
+var ErrCaptureUnsupported = errors.New("screen capture is not supported")
 
 const defaultQueue = 256
 
@@ -131,6 +135,25 @@ func (e *Engine) PollEvent() (string, bool) {
 		e.queue = nil
 	}
 	return s, true
+}
+
+// Capture returns a screenshot when the clicker implements core.ScreenCapturer.
+func (e *Engine) Capture() (image.Image, error) {
+	e.mu.Lock()
+	c := e.clicker
+	initErr := e.initErr
+	e.mu.Unlock()
+	if c == nil {
+		if initErr != nil {
+			return nil, initErr
+		}
+		return nil, errors.New("no clicker")
+	}
+	s, ok := c.(core.ScreenCapturer)
+	if !ok || s == nil {
+		return nil, ErrCaptureUnsupported
+	}
+	return s.Capture()
 }
 
 // CursorPos reads the pointer when the clicker implements core.CursorLocator.

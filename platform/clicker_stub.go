@@ -1,11 +1,12 @@
-//go:build !windows && !(darwin && cgo)
+//go:build !windows && !linux && !(darwin && cgo)
 
 package platform
 
 import "github.com/click-spirit/click-spirit/core"
 
-// New returns ErrUnsupported. Desktop clicking is implemented on Windows and
-// on darwin with cgo. Android callers should use the mobile package.
+// New returns ErrUnsupported. Desktop clicking is implemented on Windows,
+// on Linux (X11 or uinput), and on darwin with cgo. Android callers should
+// use the mobile package.
 func New() (core.Clicker, error) {
 	return nil, ErrUnsupported
 }
