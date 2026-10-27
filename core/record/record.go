@@ -1,6 +1,6 @@
 // Package record turns timestamped pointer events into a click script.
-// Platform hooks that produce the events come later. Callers can push events
-// with Recorder.Add or with an InputSource.
+// Linux hooks implement InputSource. Callers can also push events with
+// Recorder.Add or with engine.StartRecordingWith.
 package record
 
 import (

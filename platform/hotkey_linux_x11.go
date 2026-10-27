@@ -4,11 +4,23 @@ package platform
 
 /*
 #cgo pkg-config: x11 xtst
+#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XTest.h>
 
-static Display *hkOpen(void) { return XOpenDisplay(NULL); }
+// Same transient Xvfb connect failures as csOpen.
+static Display *hkOpen(void) {
+	int i;
+	for (i = 0; i < 20; i++) {
+		Display *d = XOpenDisplay(NULL);
+		if (d != NULL || i == 19) {
+			return d;
+		}
+		usleep(1000);
+	}
+	return NULL;
+}
 
 static void hkClose(Display *dpy) {
 	if (dpy != NULL) {
@@ -161,13 +173,25 @@ type x11Hotkey struct {
 
 var xGrabMu sync.Mutex
 
-// NewHotkey parses name, then opens a wake pipe. The X display is opened
-// later, on the event-loop goroutine, so Start does not touch X from the caller.
-func NewHotkey(name string) (core.HotkeySource, error) {
-	chord, err := core.ParseHotkey(name)
-	if err != nil {
-		return nil, err
+// x11HotkeyAvailable reports whether XGrabKey can run.
+// A non-empty DISPLAY that XOpenDisplay accepts counts as available.
+// The probe display is closed before return. Callers still open their own.
+func x11HotkeyAvailable() bool {
+	if os.Getenv("DISPLAY") == "" {
+		return false
 	}
+	dpy := C.hkOpen()
+	if dpy == nil {
+		return false
+	}
+	C.hkClose(dpy)
+	return true
+}
+
+// newX11Hotkey opens a wake pipe. The X display is opened later, on the
+// event-loop goroutine, so construction does not touch X past the probe
+// in x11HotkeyAvailable.
+func newX11Hotkey(chord core.Chord) (core.HotkeySource, error) {
 	var p [2]int
 	if err := unix.Pipe2(p[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
 		return nil, err
@@ -338,30 +362,6 @@ func chordMasks(chord core.Chord) []C.uint {
 		C.uint(base | x11Lock),
 		C.uint(base | x11Mod2),
 		C.uint(base | x11Lock | x11Mod2),
-	}
-}
-
-// pollX waits until the X connection or the wake pipe is readable.
-// A wake, a hangup, or a closed wake fd ends the loop.
-func pollX(xfd, wake int) error {
-	fds := []unix.PollFd{
-		{Fd: int32(xfd), Events: unix.POLLIN},
-		{Fd: int32(wake), Events: unix.POLLIN},
-	}
-	for {
-		n, err := unix.Poll(fds, 200)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if fds[1].Revents != 0 {
-			return errors.New("hotkey wake")
-		}
-		if fds[0].Revents != 0 || n == 0 {
-			return nil
-		}
 	}
 }
 

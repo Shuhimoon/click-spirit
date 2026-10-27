@@ -1,3 +1,5 @@
+//go:build !linux
+
 package platform
 
 import (
@@ -7,8 +9,8 @@ import (
 )
 
 // NewInputSource is the platform pointer hook used by engine.StartRecording.
-// Global hooks are not implemented yet. Callers can still record with
-// record.Recorder.Add or engine.StartRecordingWith and a test double.
+// Linux implements this with XRecord or evdev. Other operating systems do not.
+// Callers can still record with record.Recorder.Add or engine.StartRecordingWith.
 func NewInputSource() (record.InputSource, error) {
 	return nil, fmt.Errorf("input hooks are not implemented yet: %w", ErrUnsupported)
 }

@@ -6,6 +6,7 @@ package platform
 #cgo pkg-config: x11 xtst
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XTest.h>
@@ -14,8 +15,18 @@ static void csInitThreads(void) {
 	XInitThreads();
 }
 
+// Xvfb on a busy machine resets some new connections (ECONNRESET / EAGAIN).
+// A short retry succeeds. A display that is actually down still returns NULL.
 static Display *csOpen(void) {
-	return XOpenDisplay(NULL);
+	int i;
+	for (i = 0; i < 20; i++) {
+		Display *d = XOpenDisplay(NULL);
+		if (d != NULL || i == 19) {
+			return d;
+		}
+		usleep(1000);
+	}
+	return NULL;
 }
 
 static void csClose(Display *dpy) {

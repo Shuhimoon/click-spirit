@@ -2,6 +2,7 @@ package platform
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 )
 
@@ -15,6 +16,9 @@ func TestNewHotkeyRejectsBadName(t *testing.T) {
 }
 
 func TestNewInputSourceUnsupported(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("linux selects XRecord or evdev")
+	}
 	src, err := NewInputSource()
 	if src != nil || !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("src=%v err=%v", src, err)
