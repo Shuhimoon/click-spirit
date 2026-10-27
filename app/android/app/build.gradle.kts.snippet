@@ -1,0 +1,12 @@
+// Merge into app/android/app/build.gradle.kts after `flutter create`.
+// scripts/flutter-scaffold.sh appends the dependency and sets minSdk when it can.
+//
+// android {
+//     defaultConfig {
+//         minSdk = 24
+//     }
+// }
+
+dependencies {
+    implementation(files("libs/clickspirit.aar"))
+}

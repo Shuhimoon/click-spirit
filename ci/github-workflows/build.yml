@@ -1,0 +1,123 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt, vet, test
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+      - name: cross compile
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=windows GOARCH=386 go vet ./platform/
+          GOOS=darwin CGO_ENABLED=0 go build ./...
+          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./core ./mobile
+          CGO_ENABLED=0 go build ./...
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Install MinGW
+        run: choco install mingw -y
+      - name: Flutter scaffolding
+        shell: bash
+        run: bash scripts/flutter-scaffold.sh
+      - name: Build click_spirit.dll
+        shell: bash
+        run: |
+          if [ -d /c/ProgramData/mingw64/mingw64/bin ]; then
+            export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
+          fi
+          CC=gcc bash scripts/build-desktop-lib.sh windows
+      - name: Flutter build windows
+        working-directory: app
+        run: flutter build windows
+      - name: Copy DLL next to the exe
+        shell: bash
+        run: |
+          exe=$(find app/build/windows -name click_spirit.exe | head -n 1)
+          cp app/windows/libs/click_spirit.dll "$(dirname "$exe")/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: app/build/windows/x64/runner/
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Flutter scaffolding
+        run: bash scripts/flutter-scaffold.sh
+      - name: Universal dylib
+        run: bash scripts/build-desktop-lib.sh macos
+      - name: Flutter build macos
+        working-directory: app
+        run: flutter build macos
+      - name: Embed dylib and zip
+        run: |
+          APP=$(find app/build/macos/Build/Products -name '*.app' -type d | head -n 1)
+          mkdir -p "$APP/Contents/Frameworks"
+          cp app/macos/libs/libclick_spirit.dylib "$APP/Contents/Frameworks/"
+          install_name_tool -id @rpath/libclick_spirit.dylib "$APP/Contents/Frameworks/libclick_spirit.dylib"
+          BIN=$(find "$APP/Contents/MacOS" -type f -perm +111 | head -n 1)
+          install_name_tool -add_rpath @executable_path/../Frameworks "$BIN" || true
+          ditto -c -k --keepParent "$APP" click_spirit-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: click_spirit-macos.zip
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Flutter scaffolding
+        run: bash scripts/flutter-scaffold.sh
+      - name: gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+      - name: Build AAR
+        run: bash scripts/build-android-aar.sh
+      - name: Flutter APK
+        working-directory: app
+        run: flutter build apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app/build/app/outputs/flutter-apk/*.apk

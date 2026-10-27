@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">點擊精靈</string>
+    <string name="accessibility_service_description">點擊精靈使用無障礙服務，在你指定的座標執行點擊手勢。請只對你信任的腳本啟用。服務不會讀取密碼，也不會把畫面內容上傳。</string>
+</resources>

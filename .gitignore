@@ -1,0 +1,39 @@
+# Go / native build output
+dist/
+bin/
+*.exe
+*.test
+*.out
+*.aar
+*.dll
+*.dylib
+*.so
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+**/doc/api/
+
+# Android
+**/.gradle/
+**/local.properties
+**/captures/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Generated desktop/android libraries (keep the directories)
+app/windows/libs/*
+!app/windows/libs/.gitkeep
+app/macos/libs/*
+!app/macos/libs/.gitkeep
+app/android/app/libs/*
+!app/android/app/libs/.gitkeep
