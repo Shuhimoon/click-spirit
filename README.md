@@ -136,6 +136,44 @@ Wayland 或沒有 RECORD 時走 evdev。指標裝置要有 `BTN_LEFT`。evdev �
 
 轉換規則：移動略過。同一鍵的 down 加 up 合成一次點擊，`hold_ms` 是按住的時間，座標用按下的位置。連續點擊若同鍵、起點間隔在雙擊窗內（預設 300 毫秒，負值關閉）、位移在容許範圍（預設 3 像素），會併成 `clicks` 2 或 3。步驟間隔是這次放開到下次按下，再除以速度（`<=0` 當 1），然後不低於最短間隔。雙擊內部的空隙不會保留。回放就是把產生的腳本交給 `Runner`。FFI 的 `CS_StartRecording` 失敗時回傳 `{"error":...}`，成功是 `{"ok":true}`。`CS_StopRecording` 成功時回傳腳本 JSON。
 
+### 顯示點擊位置
+
+設定時：
+- 「步驟」面板上方有一張螢幕縮圖，標出每個步驟點在哪。
+  - 定點是帶編號的準星。
+  - 圓形是半透明圓，編號在圓心。
+  - 編號就是執行順序（1、2、3…）。
+  - 選取中或執行中的步驟用橘色標出。
+  - 找圖步驟要到執行時才知道位置，所以縮圖上不畫。
+- 編輯步驟的視窗裡也有同樣的即時縮圖。改 X、Y、圓心或半徑時，縮圖會立刻跟著變。
+- 「從螢幕點選座標」和「從螢幕擷取設定圓形」的全螢幕畫面：
+  - 其他步驟會淡淡地畫出來。
+  - 拖曳時，目前的點或圓旁邊會即時顯示座標（`x, y` 或 `圓心 x, y · r=半徑`）。
+
+執行時：
+- 引擎每點一下，就送出一個 `click` 事件，內容有實際點下的座標、步驟、第幾次和總次數。
+  - 圓形步驟回報的是隨機抽中的那個點。
+  - 找圖步驟回報的是比對到的中心點。
+  - FFI 佇列的 JSON 會多帶 `repeats` 欄位。
+  - gomobile 端透過 `EventListener.OnClick` 收到。
+- 每次點擊都會在點擊處畫一圈漣漪，並顯示標籤，例如「步驟 2 · 第 3/10 次」。
+
+各平台的浮層：
+
+| 平台 | 執行時浮層 |
+| --- | --- |
+| Linux X11 | 獨立的無邊框視窗，用 override-redirect 讓它永遠在最上層，視窗管理器不接管、也不搶焦點。外形用 XShape 遮罩，所以沒有合成器也是透明的。輸入區域設為空，滑鼠點擊會直接穿過去。標籤用 Xft 畫繁體中文。每次點擊後顯示約 1 秒再自動隱藏。 |
+| Linux Wayland（uinput） | 沒有通用的方法把視窗疊在其他程式上，所以不畫系統浮層。點擊位置只顯示在 App 視窗裡的縮圖（漣漪加標籤）。 |
+| Android | 無障礙服務加一個 `TYPE_ACCESSIBILITY_OVERLAY` 視窗，旗標是 `FLAG_NOT_TOUCHABLE \| FLAG_NOT_FOCUSABLE`，在手勢的位置畫漣漪和步驟標籤，不會擋到觸控。閒置 3 秒後移除這個視窗。 |
+| Windows、macOS | 還沒有系統浮層（`platform.NewClickOverlay` 回傳不支援），只在 App 視窗的縮圖裡顯示。 |
+
+「腳本設定」裡的「顯示點擊位置」開關：
+- 預設開啟，設定存在 App 支援資料夾的 `settings.json`。
+- 關掉後，系統浮層和 App 內的點擊標記都不顯示。
+- 事件紀錄照常會記下每次點擊。
+
+桌面版也可以在命令列帶一個腳本檔，啟動時直接開啟，例如 `click_spirit 我的腳本.json`。
+
 ### 緊急停止的平台實作
 
 - Linux，X11 連得上（cgo 且沒有 `-tags nox11`，`DISPLAY` 開得起來）：另一條 Display 連線上 `XGrabKey`，事件迴圈在自己的 goroutine。Caps Lock 與 Num Lock 的組合會一併抓住。
@@ -187,6 +225,8 @@ go build -tags nox11 ./...
 go build -buildmode=c-shared -o /tmp/libcs.so ./ffi
 # 只在私人 Xvfb 上跑，不要對現有的 DISPLAY 送事件：
 xvfb-run -a -s "-screen 0 1280x800x24" env CLICK_SPIRIT_X11_TEST=1 go test ./platform -run X11 -v
+# 點擊浮層（像素、可穿透、自動隱藏）：
+xvfb-run -a -s "-screen 0 1280x800x24" env CLICK_SPIRIT_X11_TEST=1 go test ./platform -run Overlay -v
 ```
 
 `go test` 預設不會移動游標。會送 XTest 的測試（點擊、截圖、`XGrabKey`、`XRecord`）只應該在 `xvfb-run` 底下跑，而且程式會拒絕 `:7`、`:14`、`:15`、`:17`。舊的 X11 點擊與熱鍵測試還要 `CLICK_SPIRIT_X11_TEST=1`。`XRecord` 錄製測試在 `DISPLAY` 為空或沒有 RECORD 時跳過。`CGO_ENABLED=0` 或 `-tags nox11` 不會編進 X11，這時有 `WAYLAND_DISPLAY`、或 X11 沒有編進來，就改走 uinput；錄製與熱鍵改走 evdev。Android 請改用 `mobile` 套件。
@@ -234,7 +274,7 @@ cd app && flutter build macos --no-tree-shake-icons
 
 ### Linux
 
-在 Linux 上編譯。需要 X11 與 XTest 的開發套件（`libx11-dev`、`libxtst-dev`）、`pkg-config`，以及 Flutter Linux 桌面要的 GTK（`libgtk-3-dev`、`cmake`、`ninja-build`、`clang`）。
+在 Linux 上編譯。需要 X11、XTest、XShape、Xft 的開發套件（`libx11-dev`、`libxtst-dev`、`libxext-dev`、`libxft-dev`）、`pkg-config`，以及 Flutter Linux 桌面要的 GTK（`libgtk-3-dev`、`cmake`、`ninja-build`、`clang`）。
 
 ```bash
 bash scripts/build-desktop-lib.sh linux
