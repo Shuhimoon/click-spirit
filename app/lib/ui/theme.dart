@@ -7,6 +7,7 @@ class ClickSpiritColors {
   static const systemBlue = Color(0xFF007AFF);
   static const systemRed = Color(0xFFFF3B30);
   static const systemGreen = Color(0xFF34C759);
+  static const systemOrange = Color(0xFFFF9500);
 
   static const labelLight = Color(0xFF000000);
   static const secondaryLabelLight = Color(0x993C3C43);

@@ -114,5 +114,26 @@ class ChannelClickEngine implements ClickEngine {
   }
 
   @override
+  Future<void> setShowClicks(bool on) async {
+    try {
+      await _method.invokeMethod<void>('setShowClicks', {'on': on});
+    } on PlatformException {
+      // An older native side without the overlay ignores the setting.
+    }
+  }
+
+  @override
+  Future<bool> hasClickOverlay() async {
+    try {
+      final value = await _method.invokeMethod<bool>('hasClickOverlay');
+      return value ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  @override
   void dispose() {}
 }

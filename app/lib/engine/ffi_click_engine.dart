@@ -22,6 +22,8 @@ typedef _CursorNative = Int32 Function(Pointer<Int32>, Pointer<Int32>);
 typedef _CursorDart = int Function(Pointer<Int32>, Pointer<Int32>);
 typedef _MatchNative = Pointer<Utf8> Function(Pointer<Utf8>, Double);
 typedef _MatchDart = Pointer<Utf8> Function(Pointer<Utf8>, double);
+typedef _IntInNative = Void Function(Int32);
+typedef _IntInDart = void Function(int);
 
 /// Loads click_spirit.dll, libclick_spirit.dylib, or libclick_spirit.so
 /// and polls [CS_PollEvent]. On Linux the shared library is the bundle's
@@ -45,6 +47,8 @@ class FfiClickEngine implements ClickEngine {
     _stopRecording = _lib.lookupFunction<_StrNative, _StrDart>('CS_StopRecording');
     _match = _lib.lookupFunction<_MatchNative, _MatchDart>('CS_MatchImage');
     _free = _lib.lookupFunction<_FreeNative, _FreeDart>('CS_FreeString');
+    _setShowClicks = _lib.lookupFunction<_IntInNative, _IntInDart>('CS_SetShowClicks');
+    _hasOverlay = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasClickOverlay');
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _pollOnce());
   }
 
@@ -66,6 +70,8 @@ class FfiClickEngine implements ClickEngine {
   late final _StrDart _stopRecording;
   late final _MatchDart _match;
   late final _FreeDart _free;
+  late final _IntInDart _setShowClicks;
+  late final _IntDart _hasOverlay;
   late final Timer _timer;
   final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
 
@@ -121,18 +127,22 @@ class FfiClickEngine implements ClickEngine {
     }
   }
 
+  /// Drains up to 64 queued events per tick. Every click now produces a
+  /// `step` and a `click` event, so one event per tick would fall behind.
   void _pollOnce() {
-    if (_events.isClosed) return;
-    try {
-      final raw = _take(_poll());
-      if (raw.isEmpty) return;
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        _events.add(EngineEvent.fromJson(Map<String, dynamic>.from(decoded)));
-      }
-    } catch (e, st) {
-      if (!_events.isClosed) {
-        _events.addError(e, st);
+    for (var i = 0; i < 64; i++) {
+      if (_events.isClosed) return;
+      try {
+        final raw = _take(_poll());
+        if (raw.isEmpty) return;
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          _events.add(EngineEvent.fromJson(Map<String, dynamic>.from(decoded)));
+        }
+      } catch (e, st) {
+        if (!_events.isClosed) {
+          _events.addError(e, st);
+        }
       }
     }
   }
@@ -206,6 +216,12 @@ class FfiClickEngine implements ClickEngine {
       calloc.free(native);
     }
   }
+
+  @override
+  Future<void> setShowClicks(bool on) async => _setShowClicks(on ? 1 : 0);
+
+  @override
+  Future<bool> hasClickOverlay() async => _hasOverlay() != 0;
 
   @override
   void dispose() {

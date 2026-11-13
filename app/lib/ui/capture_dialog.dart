@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'capture_mapping.dart';
 import 'glass.dart';
+import 'markers.dart';
 import 'theme.dart';
 
 enum CapturePickMode { point, circle, rect }
@@ -53,21 +54,46 @@ class CaptureSelection {
 Future<CaptureSelection?> showCaptureScreen(
   BuildContext context,
   Uint8List pngBytes,
-  CapturePickMode mode,
-) {
+  CapturePickMode mode, {
+  int number = 1,
+  List<StepMarker> others = const [],
+  CaptureSelection? initial,
+}) {
   return Navigator.of(context).push<CaptureSelection>(
     MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (context) => CaptureScreenPage(pngBytes: pngBytes, mode: mode),
+      builder: (context) => CaptureScreenPage(
+        pngBytes: pngBytes,
+        mode: mode,
+        number: number,
+        others: others,
+        initial: initial,
+      ),
     ),
   );
 }
 
 class CaptureScreenPage extends StatefulWidget {
-  const CaptureScreenPage({super.key, required this.pngBytes, required this.mode});
+  const CaptureScreenPage({
+    super.key,
+    required this.pngBytes,
+    required this.mode,
+    this.number = 1,
+    this.others = const [],
+    this.initial,
+  });
 
   final Uint8List pngBytes;
   final CapturePickMode mode;
+
+  /// One-based number of the step being edited, drawn on its marker.
+  final int number;
+
+  /// The script's other steps, drawn dimmed for reference.
+  final List<StepMarker> others;
+
+  /// Current value of the step, so its marker shows before the first tap.
+  final CaptureSelection? initial;
 
   @override
   State<CaptureScreenPage> createState() => _CaptureScreenPageState();
@@ -95,6 +121,14 @@ class _CaptureScreenPageState extends State<CaptureScreenPage> {
   @override
   void initState() {
     super.initState();
+    final init = widget.initial;
+    if (init != null) {
+      _x.text = '${init.x}';
+      _y.text = '${init.y}';
+      _cx.text = '${init.cx}';
+      _cy.text = '${init.cy}';
+      _r.text = '${init.r}';
+    }
     _decode();
   }
 
@@ -273,6 +307,8 @@ class _CaptureScreenPageState extends State<CaptureScreenPage> {
                         painter: _CapturePainter(
                           image: image,
                           fit: fit,
+                          number: widget.number,
+                          others: widget.others,
                           point: widget.mode == CapturePickMode.point ? _offset(_x, _y) : null,
                           circleCenter: widget.mode == CapturePickMode.circle ? _offset(_cx, _cy) : null,
                           circleRadius: widget.mode == CapturePickMode.circle ? double.tryParse(_r.text.trim()) : null,
@@ -441,6 +477,8 @@ class _CapturePainter extends CustomPainter {
   _CapturePainter({
     required this.image,
     required this.fit,
+    this.number = 1,
+    this.others = const [],
     this.point,
     this.circleCenter,
     this.circleRadius,
@@ -449,6 +487,8 @@ class _CapturePainter extends CustomPainter {
 
   final ui.Image image;
   final ContainFit fit;
+  final int number;
+  final List<StepMarker> others;
   final Offset? point;
   final Offset? circleCenter;
   final double? circleRadius;
@@ -480,24 +520,32 @@ class _CapturePainter extends CustomPainter {
       ..color = accent.withValues(alpha: 0.22);
     final scrim = Paint()..color = const Color(0x66000000);
 
-    final center = circleCenter;
-    final radius = circleRadius;
-    if (center != null) {
-      final c = imageToWidget(center, fit);
-      final drawn = (radius != null && radius > 0) ? radius * fit.scale : 0.0;
-      final hole = drawn > 0 ? drawn : 10.0;
-      final path = Path()
-        ..fillType = PathFillType.evenOdd
-        ..addRect(Offset.zero & size)
-        ..addOval(Rect.fromCircle(center: c, radius: hole));
-      canvas.drawPath(path, scrim);
-      if (drawn > 0) {
-        canvas.drawCircle(c, drawn, fill);
-        canvas.drawCircle(c, drawn, halo);
-        canvas.drawCircle(c, drawn, stroke);
+    // The script's other steps, dimmed, so the new point can be placed
+    // relative to them.
+    if (others.isNotEmpty) {
+      canvas.saveLayer(Offset.zero & size, Paint()..color = const Color(0x99FFFFFF));
+      for (final m in others) {
+        paintStepMarker(canvas, m, imageToWidget(m.center, fit), radius: m.radius * fit.scale);
       }
-      canvas.drawCircle(c, 4, halo);
-      canvas.drawCircle(c, 4, stroke);
+      canvas.restore();
+    }
+
+    final center = circleCenter;
+    if (center != null) {
+      final r = circleRadius ?? 0;
+      final c = imageToWidget(center, fit);
+      paintStepMarker(
+        canvas,
+        StepMarker.circle(number, center, r),
+        c,
+        radius: r > 0 ? r * fit.scale : 0,
+      );
+      paintCoordLabel(
+        canvas,
+        c,
+        '圓心 ${center.dx.round()}, ${center.dy.round()} · r=${r.round()}',
+        Offset.zero & size,
+      );
     }
     final box = rect;
     if (box != null) {
@@ -516,17 +564,8 @@ class _CapturePainter extends CustomPainter {
     final mark = point;
     if (mark != null) {
       final c = imageToWidget(mark, fit);
-      final path = Path()
-        ..fillType = PathFillType.evenOdd
-        ..addRect(Offset.zero & size)
-        ..addOval(Rect.fromCircle(center: c, radius: 22));
-      canvas.drawPath(path, scrim);
-      canvas.drawCircle(c, 5, halo);
-      canvas.drawCircle(c, 5, stroke);
-      canvas.drawLine(Offset(c.dx - 12, c.dy), Offset(c.dx + 12, c.dy), halo);
-      canvas.drawLine(Offset(c.dx, c.dy - 12), Offset(c.dx, c.dy + 12), halo);
-      canvas.drawLine(Offset(c.dx - 12, c.dy), Offset(c.dx + 12, c.dy), stroke);
-      canvas.drawLine(Offset(c.dx, c.dy - 12), Offset(c.dx, c.dy + 12), stroke);
+      paintStepMarker(canvas, StepMarker.point(number, mark), c, scale: 1.3);
+      paintCoordLabel(canvas, c, '${mark.dx.round()}, ${mark.dy.round()}', Offset.zero & size);
     }
   }
 

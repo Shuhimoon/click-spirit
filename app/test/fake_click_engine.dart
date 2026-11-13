@@ -81,6 +81,15 @@ class FakeClickEngine implements ClickEngine {
     return '{"found":true,"x":8,"y":9,"score":0.91,"error":""}';
   }
 
+  final List<bool> showClicksCalls = [];
+  bool overlay = true;
+
+  @override
+  Future<void> setShowClicks(bool on) async => showClicksCalls.add(on);
+
+  @override
+  Future<bool> hasClickOverlay() async => overlay;
+
   @override
   void dispose() {
     if (!_events.isClosed) _events.close();

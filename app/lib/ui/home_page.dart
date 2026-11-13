@@ -9,8 +9,10 @@ import 'package:flutter/material.dart' hide Step;
 import 'package:path_provider/path_provider.dart';
 
 import '../engine/click_engine.dart';
+import '../model/app_settings.dart';
 import '../model/script.dart';
 import 'glass.dart';
+import 'markers.dart';
 import 'step_dialog.dart';
 import 'step_list.dart';
 import 'theme.dart';
@@ -21,11 +23,20 @@ class HomePage extends StatefulWidget {
     required this.engine,
     required this.enableCursorCapture,
     required this.enableAccessibility,
+    this.settings,
+    this.initialScript,
   });
+
+  /// Script shown at launch. Null shows the built-in sample.
+  final Script? initialScript;
 
   final ClickEngine engine;
   final bool enableCursorCapture;
   final bool enableAccessibility;
+
+  /// Where preferences such as 顯示點擊位置 are kept. Null uses a JSON file
+  /// in the app support directory.
+  final SettingsStore? settings;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -54,14 +65,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _status = '就緒';
   String _backend = '';
   int _captureGen = 0;
+  late final SettingsStore _store = widget.settings ?? FileSettingsStore();
+  bool _showClicks = true;
+  bool _hasOverlay = false;
+  ClickMark? _lastClick;
+  int _clickSerial = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _apply(Script.sample());
+    _apply(widget.initialScript ?? Script.sample());
     _sub = widget.engine.events.listen(_onEvent);
     _loadBackend();
+    _loadSettings();
     if (widget.enableAccessibility) {
       _refreshA11y();
     }
@@ -73,6 +90,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() => _backend = name);
     } catch (_) {}
+  }
+
+  Future<void> _loadSettings() async {
+    final settings = await _store.load();
+    var overlay = false;
+    try {
+      overlay = await widget.engine.hasClickOverlay();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _showClicks = settings.showClicks;
+      _hasOverlay = overlay;
+    });
+    await widget.engine.setShowClicks(settings.showClicks);
+  }
+
+  Future<void> _setShowClicks(bool on) async {
+    setState(() {
+      _showClicks = on;
+      if (!on) _lastClick = null;
+    });
+    await widget.engine.setShowClicks(on);
+    await _store.save(AppSettings(showClicks: on));
   }
 
   @override
@@ -141,7 +181,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _running = true;
           _sawEmergency = false;
           _activeStep = null;
+          _lastClick = null;
           _status = '執行中';
+        case 'click':
+          _running = true;
+          if (ev.step >= 0 && ev.step < _rows.length) {
+            _activeStep = ev.step;
+            _activeRepetition = ev.repetition;
+            final total = ev.repeats > 0 ? ev.repeats : _rows[ev.step].step.effectiveRepeat;
+            _lastClick = ClickMark(
+              x: ev.x,
+              y: ev.y,
+              step: ev.step,
+              repetition: ev.repetition,
+              repeats: total,
+              serial: ++_clickSerial,
+            );
+            _status = '執行中：${clickLabel(ev.step, ev.repetition, total)} · 點在 (${ev.x}, ${ev.y})';
+          }
         case 'step':
           _running = true;
           if (ev.step >= 0 && ev.step < _rows.length) {
@@ -254,14 +311,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// Numbered markers of every step except [skip], for the editor previews.
+  List<StepMarker> _markersExcept(int? skip) {
+    final steps = _rows.map((row) => row.step).toList();
+    return markersOf(steps).where((m) => m.number - 1 != skip).toList();
+  }
+
   Future<void> _add() async {
-    final step = await showStepEditor(context, engine: widget.engine);
+    final step = await showStepEditor(
+      context,
+      engine: widget.engine,
+      number: _rows.length + 1,
+      others: _markersExcept(null),
+    );
     if (step == null || !mounted) return;
     setState(() => _rows.add(StepRow(step)));
   }
 
   Future<void> _edit(int index) async {
-    final step = await showStepEditor(context, initial: _rows[index].step, engine: widget.engine);
+    final step = await showStepEditor(
+      context,
+      initial: _rows[index].step,
+      engine: widget.engine,
+      number: index + 1,
+      others: _markersExcept(index),
+    );
     if (step == null || !mounted) return;
     setState(() => _rows[index].step = step);
   }
@@ -653,9 +727,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               keyboardType: TextInputType.number,
             )),
             box(GlassTextField(controller: _hotkey, label: '緊急停止熱鍵')),
+            box(_showClicksTile(), full: true),
           ],
         );
       },
+    );
+  }
+
+  Widget _showClicksTile() {
+    final secondary = ClickSpiritColors.secondary(context);
+    final detail = _hasOverlay
+        ? '執行時在每次點擊處顯示漣漪與步驟編號。浮層在所有視窗上方，不會擋住滑鼠或觸控。'
+        : '此平台目前沒有系統浮層，點擊位置只顯示在本視窗的預覽中。';
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '顯示點擊位置',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                  color: ClickSpiritColors.label(context),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(detail, style: TextStyle(fontSize: 12, height: 1.35, color: secondary)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Switch(
+          key: const Key('show-clicks-switch'),
+          value: _showClicks,
+          onChanged: _setShowClicks,
+        ),
+      ],
+    );
+  }
+
+  Widget _mapPreview() {
+    final steps = _rows.map((row) => row.step).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).width >= 700 ? 168 : 120,
+        child: StepMapPreview(
+          markers: markersOf(steps),
+          highlight: _activeStep ?? _selected,
+          lastClick: _showClicks ? _lastClick : null,
+        ),
+      ),
     );
   }
 
@@ -690,6 +815,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ],
             ),
           ),
+          if (_rows.isNotEmpty || _lastClick != null) _mapPreview(),
           Expanded(
             child: StepList(
               rows: _rows,

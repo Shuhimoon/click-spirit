@@ -17,6 +17,7 @@ class EngineEvent {
     required this.step,
     required this.message,
     this.repetition = 0,
+    this.repeats = 0,
     this.x = 0,
     this.y = 0,
     this.button = '',
@@ -31,6 +32,9 @@ class EngineEvent {
 
   /// Zero-based repetition inside the step. Missing JSON means 0.
   final int repetition;
+
+  /// The step's repeat count for step and click events. 0 when unknown.
+  final int repeats;
   final String message;
   final int x;
   final int y;
@@ -43,6 +47,7 @@ class EngineEvent {
       loop: _asInt(json['loop']),
       step: _asInt(json['step']),
       repetition: _asInt(json['repetition']),
+      repeats: _asInt(json['repeats']),
       message: _asString(json['message']),
       x: _asInt(json['x']),
       y: _asInt(json['y']),
@@ -187,6 +192,14 @@ abstract class ClickEngine {
   /// when a capture is available. [threshold] `<= 0` uses 0.9.
   Future<String> matchImage(String templatePath, double threshold, {Uint8List? screenPng});
 
+  /// Turns the run-time click overlay on or off. The engine still reports
+  /// `click` events either way.
+  Future<void> setShowClicks(bool on);
+
+  /// Whether this platform draws a click overlay above other apps (Linux X11
+  /// and Android). Elsewhere the app shows clicks in its own window only.
+  Future<bool> hasClickOverlay();
+
   void dispose();
 }
 
@@ -249,6 +262,12 @@ class UnavailableClickEngine implements ClickEngine {
   Future<String> matchImage(String templatePath, double threshold, {Uint8List? screenPng}) async {
     return matchErrorJson('原生函式庫無法載入：$error');
   }
+
+  @override
+  Future<void> setShowClicks(bool on) async {}
+
+  @override
+  Future<bool> hasClickOverlay() async => false;
 
   @override
   void dispose() {

@@ -29,12 +29,29 @@ class MainActivity : FlutterActivity() {
 
         Mobile.setListener(object : EventListener {
             override fun onEvent(kind: String?, loop: Long, step: Long, message: String?) {
+                // Clicks arrive with their position through onClick below.
+                if (kind == "click") return
                 emit(
                     mapOf(
                         "kind" to (kind ?: ""),
                         "loop" to loop,
                         "step" to step,
                         "message" to (message ?: ""),
+                    ),
+                )
+            }
+
+            override fun onClick(x: Long, y: Long, step: Long, repetition: Long, repeats: Long) {
+                emit(
+                    mapOf(
+                        "kind" to "click",
+                        "loop" to 0L,
+                        "step" to step,
+                        "repetition" to repetition,
+                        "repeats" to repeats,
+                        "x" to x,
+                        "y" to y,
+                        "message" to "",
                     ),
                 )
             }
@@ -101,6 +118,12 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "cursorPos" -> result.success(null)
+                "setShowClicks" -> {
+                    Mobile.setShowClicks(call.argument<Boolean>("on") ?: true)
+                    result.success(null)
+                }
+                // The overlay is drawn by the accessibility service, which taps need anyway.
+                "hasClickOverlay" -> result.success(true)
                 else -> result.notImplemented()
             }
         }

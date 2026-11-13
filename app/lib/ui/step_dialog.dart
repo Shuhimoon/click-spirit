@@ -10,6 +10,7 @@ import '../engine/click_engine.dart';
 import '../model/script.dart';
 import 'capture_dialog.dart';
 import 'glass.dart';
+import 'markers.dart';
 import 'png_crop.dart';
 import 'theme.dart';
 
@@ -17,19 +18,27 @@ Future<Step?> showStepEditor(
   BuildContext context, {
   Step? initial,
   ClickEngine? engine,
+  int number = 1,
+  List<StepMarker> others = const [],
 }) {
   return showDialog<Step>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.28),
-    builder: (context) => StepEditorDialog(initial: initial, engine: engine),
+    builder: (context) => StepEditorDialog(initial: initial, engine: engine, number: number, others: others),
   );
 }
 
 class StepEditorDialog extends StatefulWidget {
-  const StepEditorDialog({super.key, this.initial, this.engine});
+  const StepEditorDialog({super.key, this.initial, this.engine, this.number = 1, this.others = const []});
 
   final Step? initial;
   final ClickEngine? engine;
+
+  /// One-based position of this step in the script.
+  final int number;
+
+  /// Markers of the script's other steps, shown dimmed on the capture screen.
+  final List<StepMarker> others;
 
   @override
   State<StepEditorDialog> createState() => _StepEditorDialogState();
@@ -162,6 +171,20 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
     }
   }
 
+  CaptureSelection? _initialSelection(CapturePickMode mode) {
+    int? n(TextEditingController c) => int.tryParse(c.text.trim());
+    switch (mode) {
+      case CapturePickMode.point:
+        final x = n(_x), y = n(_y);
+        return x == null || y == null ? null : CaptureSelection.point(x, y);
+      case CapturePickMode.circle:
+        final cx = n(_cx), cy = n(_cy), r = n(_r);
+        return cx == null || cy == null || r == null ? null : CaptureSelection.circle(cx, cy, r);
+      case CapturePickMode.rect:
+        return null;
+    }
+  }
+
   Future<void> _pickOnScreen(CapturePickMode mode) async {
     if (_busy) return;
     setState(() {
@@ -172,7 +195,14 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (bytes == null) return;
-    final picked = await showCaptureScreen(context, bytes, mode);
+    final picked = await showCaptureScreen(
+      context,
+      bytes,
+      mode,
+      number: widget.number,
+      others: widget.others,
+      initial: _initialSelection(mode),
+    );
     if (!mounted || picked == null) return;
     if (mode == CapturePickMode.rect) {
       setState(() => _busy = true);
@@ -459,6 +489,30 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
     );
   }
 
+  /// Live miniature of where this step clicks, next to the script's other steps.
+  Widget _livePreview() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_x, _y, _cx, _cy, _r]),
+      builder: (context, _) {
+        int v(TextEditingController c) => int.tryParse(c.text.trim()) ?? 0;
+        final StepMarker self = _kind == 'circle'
+            ? StepMarker.circle(widget.number, Offset(v(_cx).toDouble(), v(_cy).toDouble()), v(_r).toDouble())
+            : StepMarker.point(widget.number, Offset(v(_x).toDouble(), v(_y).toDouble()));
+        return Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: SizedBox(
+            height: 130,
+            child: StepMapPreview(
+              key: const Key('step-editor-preview'),
+              markers: [...widget.others, self],
+              highlight: widget.number - 1,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   List<Widget> _pointFields() {
     return [
       GlassTextField(
@@ -484,6 +538,7 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
           variant: GlassButtonVariant.tinted,
         ),
       ),
+      _livePreview(),
     ];
   }
 
@@ -519,6 +574,7 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
           variant: GlassButtonVariant.tinted,
         ),
       ),
+      _livePreview(),
     ];
   }
 
