@@ -23,14 +23,27 @@ type GestureDispatcher interface {
 }
 
 // EventListener receives runner progress. step is -1 when the event is not a step.
+// OnClick is called after every performed click with the clicked screen
+// position, the zero-based step and repetition, and the step's repeat count.
+// OnEvent also receives a "click" event for the same click.
 type EventListener interface {
 	OnEvent(kind string, loop int, step int, message string)
+	OnClick(x, y, step, repetition, repeats int)
+}
+
+// ClickOverlay draws the run-time click marker. On Android the accessibility
+// service implements it with a TYPE_ACCESSIBILITY_OVERLAY window that does
+// not take touches. label is e.g. "步驟 2 · 第 3/10 次".
+type ClickOverlay interface {
+	ShowClick(x, y int, label string)
 }
 
 var (
 	mu       sync.Mutex
 	disp     GestureDispatcher
 	listener EventListener
+	overlay  ClickOverlay
+	showOff  bool
 	clicker  *dispatcherClicker
 	eng      *engine.Engine
 )
@@ -51,6 +64,27 @@ func SetListener(l EventListener) {
 	mu.Lock()
 	listener = l
 	mu.Unlock()
+}
+
+// SetOverlay installs the run-time click overlay. Nil removes it.
+func SetOverlay(o ClickOverlay) {
+	mu.Lock()
+	overlay = o
+	mu.Unlock()
+}
+
+// SetShowClicks turns the run-time click overlay on (the default) or off.
+func SetShowClicks(on bool) {
+	mu.Lock()
+	showOff = !on
+	mu.Unlock()
+}
+
+// ShowClicks reports whether the run-time click overlay is on.
+func ShowClicks() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return !showOff
 }
 
 // ValidateScript parses and validates script JSON.
@@ -142,9 +176,19 @@ func forwardEvent(ev core.Event) {
 	msg := engine.Message(ev)
 	mu.Lock()
 	l := listener
+	var o ClickOverlay
+	if ev.Kind == core.EventClick && !showOff {
+		o = overlay
+	}
 	mu.Unlock()
+	if o != nil {
+		o.ShowClick(ev.Step.X, ev.Step.Y, engine.ClickLabel(ev))
+	}
 	if l != nil {
 		l.OnEvent(string(ev.Kind), ev.Loop, ev.StepIndex, msg)
+		if ev.Kind == core.EventClick {
+			l.OnClick(ev.Step.X, ev.Step.Y, ev.StepIndex, ev.Repetition, ev.Repeats)
+		}
 	}
 }
 

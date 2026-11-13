@@ -38,9 +38,29 @@ func (f *fakeDisp) Tap(x, y, durationMs, count int) bool {
 }
 
 type fakeListener struct {
-	mu    sync.Mutex
-	kinds []string
-	msgs  []string
+	mu     sync.Mutex
+	kinds  []string
+	msgs   []string
+	clicks [][5]int
+}
+
+func (f *fakeListener) OnClick(x, y, step, repetition, repeats int) {
+	f.mu.Lock()
+	f.clicks = append(f.clicks, [5]int{x, y, step, repetition, repeats})
+	f.mu.Unlock()
+}
+
+type fakeOverlay struct {
+	mu     sync.Mutex
+	labels []string
+	pts    [][2]int
+}
+
+func (f *fakeOverlay) ShowClick(x, y int, label string) {
+	f.mu.Lock()
+	f.pts = append(f.pts, [2]int{x, y})
+	f.labels = append(f.labels, label)
+	f.mu.Unlock()
 }
 
 func (f *fakeListener) OnEvent(kind string, loop, step int, message string) {
@@ -62,6 +82,8 @@ func reset(t *testing.T) {
 	mu.Lock()
 	disp = nil
 	listener = nil
+	overlay = nil
+	showOff = false
 	clicker = nil
 	eng = nil
 	mu.Unlock()
@@ -417,4 +439,77 @@ func checkerImage(n int) *image.RGBA {
 		}
 	}
 	return img
+}
+
+func TestClickEventsReachListenerAndOverlay(t *testing.T) {
+	reset(t)
+	f := &fakeDisp{ok: true}
+	l := &fakeListener{}
+	ov := &fakeOverlay{}
+	SetDispatcher(f)
+	SetListener(l)
+	SetOverlay(ov)
+	raw := mustJSON(t, &core.Script{
+		Version: 1,
+		Repeat:  1,
+		Steps: []core.Step{
+			{X: 10, Y: 20, Button: core.ButtonLeft},
+			{Button: core.ButtonLeft, Repeat: 3, Target: &core.Target{Kind: core.TargetCircle, CX: 200, CY: 300, R: 40}},
+		},
+	})
+	if err := StartScript(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := currentEngine(t).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	taps := append([]tap(nil), f.taps...)
+	f.mu.Unlock()
+	l.mu.Lock()
+	clicks := append([][5]int(nil), l.clicks...)
+	l.mu.Unlock()
+	ov.mu.Lock()
+	labels := append([]string(nil), ov.labels...)
+	pts := append([][2]int(nil), ov.pts...)
+	ov.mu.Unlock()
+
+	if len(clicks) != 4 || len(taps) != 4 || len(labels) != 4 {
+		t.Fatalf("clicks %v taps %v labels %v", clicks, taps, labels)
+	}
+	wantLabels := []string{"步驟 1", "步驟 2 · 第 1/3 次", "步驟 2 · 第 2/3 次", "步驟 2 · 第 3/3 次"}
+	for i, c := range clicks {
+		if c[0] != taps[i].x || c[1] != taps[i].y {
+			t.Fatalf("click %d at (%d,%d) but tap at (%d,%d)", i, c[0], c[1], taps[i].x, taps[i].y)
+		}
+		if pts[i] != [2]int{c[0], c[1]} || labels[i] != wantLabels[i] {
+			t.Fatalf("overlay %d = %v %q, want %v %q", i, pts[i], labels[i], c[:2], wantLabels[i])
+		}
+		if i > 0 {
+			if c[2] != 1 || c[3] != i-1 || c[4] != 3 {
+				t.Fatalf("click %d = %v", i, c)
+			}
+			if d := math.Hypot(float64(c[0]-200), float64(c[1]-300)); d > 40.75 {
+				t.Fatalf("circle tap %v outside r=40", c)
+			}
+		}
+	}
+
+	// Turning the overlay off keeps listener clicks but skips drawing.
+	SetShowClicks(false)
+	if ShowClicks() {
+		t.Fatal("ShowClicks should be false")
+	}
+	if err := StartScript(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := currentEngine(t).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	ov.mu.Lock()
+	n := len(ov.labels)
+	ov.mu.Unlock()
+	if n != 4 {
+		t.Fatalf("overlay drew while disabled: %d draws", n)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"sync"
 	"time"
@@ -32,6 +33,9 @@ type Engine struct {
 	queue    []string
 	maxQueue int
 	hook     func(core.Event)
+
+	overlay    core.ClickOverlay
+	hideClicks bool
 
 	capturer   core.ScreenCapturer
 	hotkeyMu   sync.Mutex
@@ -216,7 +220,14 @@ func (e *Engine) onRunnerEvent(ev core.Event) {
 	e.mu.Lock()
 	e.pushLocked(string(payload))
 	hook := e.hook
+	var overlay core.ClickOverlay
+	if ev.Kind == core.EventClick && !e.hideClicks {
+		overlay = e.overlay
+	}
 	e.mu.Unlock()
+	if overlay != nil {
+		overlay.ShowClick(ev.Step.X, ev.Step.Y, ClickLabel(ev))
+	}
 	if hook != nil {
 		hook(ev)
 	}
@@ -240,6 +251,7 @@ type eventPayload struct {
 	Loop       int    `json:"loop"`
 	Step       int    `json:"step"`
 	Repetition int    `json:"repetition"`
+	Repeats    int    `json:"repeats"`
 	Message    string `json:"message"`
 	X          int    `json:"x"`
 	Y          int    `json:"y"`
@@ -253,13 +265,14 @@ func payloadOf(ev core.Event) eventPayload {
 		Loop:       ev.Loop,
 		Step:       ev.StepIndex,
 		Repetition: ev.Repetition,
+		Repeats:    ev.Repeats,
 		Message:    Message(ev),
 		X:          ev.Step.X,
 		Y:          ev.Step.Y,
 		Button:     string(ev.Step.Button),
 		Clicks:     ev.Step.Clicks,
 	}
-	if ev.Kind == core.EventStep {
+	if ev.Kind == core.EventStep || ev.Kind == core.EventClick {
 		p.Clicks = ev.Step.EffectiveClicks()
 	}
 	return p
@@ -280,6 +293,8 @@ func Message(ev core.Event) string {
 		return "已停止"
 	case core.EventEmergencyStop:
 		return "緊急停止"
+	case core.EventClick:
+		return fmt.Sprintf("%s 點在 (%d,%d)", ClickLabel(ev), ev.Step.X, ev.Step.Y)
 	case core.EventError:
 		if ev.Err != nil {
 			return ev.Err.Error()

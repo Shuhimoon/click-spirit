@@ -27,6 +27,10 @@ const (
 	EventStopped       EventKind = "stopped"
 	EventError         EventKind = "error"
 	EventEmergencyStop EventKind = "emergency_stop"
+	// EventClick is emitted after a click was actually performed. Step.X and
+	// Step.Y hold the clicked screen position (the drawn point for circles,
+	// the match center for images). It is not emitted for skipped image steps.
+	EventClick EventKind = "click"
 )
 
 // ErrNoCapturer is returned when an image step runs without a ScreenCapturer.
@@ -44,8 +48,11 @@ type Event struct {
 	Loop       int
 	StepIndex  int
 	Repetition int
-	Step       Step
-	Err        error
+	// Repeats is the step's effective repeat count (>= 1) for step and click
+	// events, and 0 otherwise.
+	Repeats int
+	Step    Step
+	Err     error
 }
 
 // Clicker performs pointer actions.
@@ -263,7 +270,7 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 				if !skip {
 					shown.X, shown.Y = x, y
 				}
-				f.emit(Event{Kind: EventStep, Loop: loop, StepIndex: i, Repetition: rep, Step: shown})
+				f.emit(Event{Kind: EventStep, Loop: loop, StepIndex: i, Repetition: rep, Repeats: reps, Step: shown})
 				if !skip {
 					if err := f.clicker.MoveTo(x, y); err != nil {
 						f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Repetition: rep, Step: shown, Err: err})
@@ -273,6 +280,7 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 						f.emit(Event{Kind: EventError, Loop: loop, StepIndex: i, Repetition: rep, Step: shown, Err: err})
 						return err
 					}
+					f.emit(Event{Kind: EventClick, Loop: loop, StepIndex: i, Repetition: rep, Repeats: reps, Step: shown})
 				}
 				if err := f.wait(ctx, step.EffectiveIntervalMs(s.DefaultIntervalMs)); err != nil {
 					return f.endWait(ctx, err, loop, i, step)

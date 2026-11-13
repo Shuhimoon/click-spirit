@@ -33,6 +33,11 @@ func shared() *engine.Engine {
 		sharedEng = engine.New(c, err)
 		sharedEng.SetHotkeyFactory(platform.NewHotkey)
 		sharedEng.SetInputFactory(platform.NewInputSource)
+		if c != nil {
+			if ov, ovErr := platform.NewClickOverlay(); ovErr == nil {
+				sharedEng.SetOverlay(ov)
+			}
+		}
 	})
 	return sharedEng
 }
@@ -200,6 +205,24 @@ func jsonErr(err error) string {
 		return `{"error":"unknown"}`
 	}
 	return string(b)
+}
+
+// CS_SetShowClicks turns the run-time click overlay on (non-zero) or off.
+//
+//export CS_SetShowClicks
+func CS_SetShowClicks(on C.int) {
+	shared().SetShowClicks(on != 0)
+}
+
+// CS_HasClickOverlay returns 1 when this backend can draw the run-time click
+// overlay (Linux X11 today). Otherwise the app shows clicks in its own window.
+//
+//export CS_HasClickOverlay
+func CS_HasClickOverlay() C.int {
+	if shared().HasOverlay() {
+		return 1
+	}
+	return 0
 }
 
 //export CS_FreeString
