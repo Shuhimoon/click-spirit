@@ -19,7 +19,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install X11 headers
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxft-dev pkg-config
       - name: gofmt, vet, test
         env:
           CGO_ENABLED: "1"
@@ -65,7 +65,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libgtk-3-dev ninja-build clang cmake pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libxft-dev libgtk-3-dev ninja-build clang cmake pkg-config
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
       - name: Flutter scaffolding
