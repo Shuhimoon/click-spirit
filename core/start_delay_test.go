@@ -149,3 +149,31 @@ func TestStartDelayCancelProducesNoClicks(t *testing.T) {
 		}
 	}
 }
+
+func TestRunnerExcludeSkipsBubbleClicks(t *testing.T) {
+	rec := &recorder{}
+	bubble := Rect{X: 90, Y: 90, W: 20, H: 20}
+	var kinds []EventKind
+	r := &Runner{Clicker: rec, Sleep: rec.sleep, Exclude: func(x, y int) bool { return bubble.Contains(x, y) },
+		OnEvent: func(ev Event) { kinds = append(kinds, ev.Kind) }}
+	s := &Script{StartDelaySec: StartDelay(0), Version: 1, Repeat: 1, Steps: []Step{
+		{X: 100, Y: 100, Button: ButtonLeft},
+		{X: 5, Y: 6, Button: ButtonLeft},
+	}}
+	if err := r.Run(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	got := rec.snapshot()
+	if len(got) != 2 || got[0] != "move 5 6" {
+		t.Fatalf("clicks %v", got)
+	}
+	found := false
+	for _, k := range kinds {
+		if k == EventExcluded {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no excluded event in %v", kinds)
+	}
+}

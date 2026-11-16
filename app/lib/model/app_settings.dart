@@ -5,18 +5,38 @@ import 'package:path_provider/path_provider.dart';
 
 /// User preferences that outlive a session.
 class AppSettings {
-  const AppSettings({this.showClicks = true});
+  const AppSettings({this.showClicks = true, this.showBubble = false, this.defaultScript = ''});
 
   /// 顯示點擊位置: draw the run-time click overlay. On by default.
   final bool showClicks;
 
-  AppSettings copyWith({bool? showClicks}) => AppSettings(showClicks: showClicks ?? this.showClicks);
+  /// 顯示小浮窗: the always-on-top floating bubble. Off by default.
+  final bool showBubble;
 
-  Map<String, Object?> toJson() => {'show_clicks': showClicks};
+  /// Library id of the script the bubble's 開始腳本 runs. Empty means none.
+  final String defaultScript;
+
+  AppSettings copyWith({bool? showClicks, bool? showBubble, String? defaultScript}) => AppSettings(
+        showClicks: showClicks ?? this.showClicks,
+        showBubble: showBubble ?? this.showBubble,
+        defaultScript: defaultScript ?? this.defaultScript,
+      );
+
+  Map<String, Object?> toJson() => {
+        'show_clicks': showClicks,
+        'show_bubble': showBubble,
+        'default_script': defaultScript,
+      };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final show = json['show_clicks'];
-    return AppSettings(showClicks: show is bool ? show : true);
+    final bubble = json['show_bubble'];
+    final def = json['default_script'];
+    return AppSettings(
+      showClicks: show is bool ? show : true,
+      showBubble: bubble is bool ? bubble : false,
+      defaultScript: def is String ? def : '',
+    );
   }
 }
 

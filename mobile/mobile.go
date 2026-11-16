@@ -176,6 +176,7 @@ func ensureLocked() (*engine.Engine, error) {
 	if eng == nil {
 		eng = engine.New(clicker, nil)
 		eng.SetHook(forwardEvent)
+		eng.SetBubble(bubble)
 	}
 	return eng, nil
 }

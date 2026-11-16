@@ -1,10 +1,20 @@
 package com.clickspirit.click_spirit
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import com.clickspirit.mobile.EventListener
 import com.clickspirit.mobile.Mobile
 import io.flutter.embedding.android.FlutterActivity
@@ -29,6 +39,11 @@ class MainActivity : FlutterActivity() {
 
         Mobile.setListener(object : EventListener {
             override fun onEvent(kind: String?, loop: Long, step: Long, message: String?) {
+                when (kind) {
+                    "started", "step", "countdown" -> ClickAccessibilityService.instance?.setBubbleRunning(true)
+                    "finished", "stopped", "error", "emergency_stop" ->
+                        ClickAccessibilityService.instance?.setBubbleRunning(false)
+                }
                 // Clicks arrive with their position through onClick below.
                 if (kind == "click" || kind == "countdown") return
                 emit(
@@ -68,6 +83,9 @@ class MainActivity : FlutterActivity() {
                 )
             }
         })
+        ClickAccessibilityService.bubbleListener = { action ->
+            emit(mapOf("kind" to "bubble", "loop" to 0L, "step" to -1L, "message" to action))
+        }
         ClickAccessibilityService.instance?.let { service ->
             try {
                 Mobile.setDispatcher(service)
@@ -107,12 +125,36 @@ class MainActivity : FlutterActivity() {
                     null
                 }
                 "setHotkey" -> result.success("Android 沒有全域熱鍵")
-                "startRecording" -> result.success(
-                    "{\"error\":\"Android 不支援錄製，沒有全域輸入鉤子\"}",
-                )
-                "stopRecording" -> result.success(
-                    "{\"error\":\"Android 不支援錄製，沒有全域輸入鉤子\"}",
-                )
+                "startRecording" -> startTapRecording(result)
+                "stopRecording" -> stopTapRecording(result)
+                "hasBubble" -> result.success(true)
+                "setBubbleVisible" -> {
+                    val service = ClickAccessibilityService.instance
+                    if (service == null) {
+                        result.error("click_spirit", "請先在設定中啟用點擊精靈的無障礙服務", null)
+                    } else {
+                        service.setBubbleVisible(call.argument<Boolean>("on") ?: false)
+                        result.success(null)
+                    }
+                }
+                "hasVideoRecorder" -> result.success(true)
+                "startScreenRecording" -> startScreenRecording(call.argument<String>("path") ?: "", result)
+                "stopScreenRecording" -> stopScreenRecording(result)
+                "videoFrame" -> async(result) {
+                    videoFrame(
+                        call.argument<String>("video") ?: "",
+                        asDouble(call.argument<Any>("at_ms")).toLong(),
+                        call.argument<String>("out") ?: "",
+                        asDouble(call.argument<Any>("width")).toInt(),
+                    )
+                }
+                "clicksToScript" -> async(result) {
+                    try {
+                        Mobile.clicksToScript(call.argument<String>("clicks") ?: "[]", call.argument<String>("name") ?: "")
+                    } catch (e: Exception) {
+                        JSONObject().put("error", e.message ?: e.toString()).toString()
+                    }
+                }
                 "matchImage" -> async(result) {
                     val template = asBytes(call.argument<Any>("template"))
                     val screen = asBytes(call.argument<Any>("screen"))
@@ -184,6 +226,155 @@ class MainActivity : FlutterActivity() {
         }, 350L)
     }
 
+    private fun noService(): String =
+        JSONObject().put("error", "請先在設定中啟用點擊精靈的無障礙服務（錄製需要它）").toString()
+
+    /**
+     * 開始錄製: a touchable full-screen overlay records each tap and replays
+     * it with dispatchGesture (see TapRecorderOverlay). The app moves back so
+     * the user can tap the real screen.
+     */
+    private fun startTapRecording(result: MethodChannel.Result) {
+        val service = ClickAccessibilityService.instance
+        if (service == null) {
+            result.success(noService())
+            return
+        }
+        if (!service.startTapRecording(SystemClock.uptimeMillis())) {
+            result.success(JSONObject().put("error", "無法顯示錄製浮層").toString())
+            return
+        }
+        result.success("{\"ok\":true}")
+        moveTaskToBack(true)
+    }
+
+    private fun stopTapRecording(result: MethodChannel.Result) {
+        val taps = ClickAccessibilityService.instance?.stopTapRecording()
+        if (taps == null) {
+            result.success("{\"error\":\"not recording\"}")
+            return
+        }
+        if (JSONArray(taps).length() == 0) {
+            result.success(JSONObject().put("error", "沒有錄到點擊").toString())
+            return
+        }
+        async(result) {
+            try {
+                Mobile.clicksToScript(taps, "")
+            } catch (e: Exception) {
+                JSONObject().put("error", e.message ?: e.toString()).toString()
+            }
+        }
+    }
+
+    private var pendingScreen: MethodChannel.Result? = null
+    private var screenPath = ""
+
+    /**
+     * 錄影轉腳本: asks for MediaProjection consent, starts the foreground
+     * ScreenRecordService (MediaRecorder mp4) and the tap recorder with the
+     * same time origin, then moves the app back.
+     */
+    private fun startScreenRecording(path: String, result: MethodChannel.Result) {
+        val service = ClickAccessibilityService.instance
+        if (service == null) {
+            result.success("請先在設定中啟用點擊精靈的無障礙服務（記錄點擊需要它）")
+            return
+        }
+        if (pendingScreen != null || ScreenRecordService.instance != null) {
+            result.success("已經在錄影")
+            return
+        }
+        screenPath = path.ifEmpty {
+            val dir = File(getExternalFilesDir(null) ?: filesDir, "recordings").apply { mkdirs() }
+            File(dir, "錄影-${System.currentTimeMillis()}.mp4").absolutePath
+        }
+        File(screenPath).parentFile?.mkdirs()
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        pendingScreen = result
+        @Suppress("DEPRECATION")
+        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_SCREEN)
+    }
+
+    @Deprecated("FlutterActivity still routes results here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_SCREEN) return
+        val reply = pendingScreen ?: return
+        pendingScreen = null
+        if (resultCode != RESULT_OK || data == null) {
+            reply.success("已取消錄影授權")
+            return
+        }
+        ScreenRecordService.pendingStart = { start, err ->
+            if (err != null) {
+                reply.success("無法開始錄影：$err")
+            } else {
+                val service = ClickAccessibilityService.instance
+                if (service == null || !service.startTapRecording(start)) {
+                    ScreenRecordService.instance?.finish()
+                    reply.success("無法顯示錄製浮層")
+                } else {
+                    reply.success("")
+                    moveTaskToBack(true)
+                }
+            }
+        }
+        val intent = Intent(this, ScreenRecordService::class.java)
+            .putExtra(ScreenRecordService.EXTRA_CODE, resultCode)
+            .putExtra(ScreenRecordService.EXTRA_DATA, data)
+            .putExtra(ScreenRecordService.EXTRA_PATH, screenPath)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        } catch (t: Throwable) {
+            ScreenRecordService.pendingStart = null
+            reply.success("無法啟動錄影服務：${t.message}")
+        }
+    }
+
+    private fun stopScreenRecording(result: MethodChannel.Result) {
+        val taps = ClickAccessibilityService.instance?.stopTapRecording() ?: "[]"
+        val err = ScreenRecordService.instance?.finish()
+        val file = File(screenPath)
+        val hasVideo = screenPath.isNotEmpty() && file.exists() && file.length() > 0
+        val (sw, sh) = ScreenRecordService.realScreenSize(this)
+        val out = JSONObject()
+            .put("video", if (hasVideo) screenPath else "")
+            .put("note", err ?: if (hasVideo) "" else "沒有產生影片，只記錄點擊")
+            .put("clicks", JSONArray(taps))
+            .put("screen_w", sw)
+            .put("screen_h", sh)
+        result.success(out.toString())
+    }
+
+    /** PNG thumbnail of [video] at [atMs]; "" on success. */
+    private fun videoFrame(video: String, atMs: Long, out: String, width: Int): String {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(video)
+            val frame = retriever.getFrameAtTime(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?: return "影片中沒有這個時間點"
+            val w = if (width > 0) width else 320
+            val h = (frame.height.toLong() * w / frame.width.coerceAtLeast(1)).toInt().coerceAtLeast(1)
+            val scaled = Bitmap.createScaledBitmap(frame, w, h, true)
+            FileOutputStream(out).use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            ""
+        } catch (t: Throwable) {
+            t.message ?: t.toString()
+        } finally {
+            try {
+                retriever.release()
+            } catch (ignored: Throwable) {
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        ClickAccessibilityService.bubbleListener = null
+        super.onDestroy()
+    }
+
     private fun emit(event: Map<String, Any?>) {
         mainHandler.post {
             val sink = eventSink
@@ -210,6 +401,10 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun asBytes(value: Any?): ByteArray? = value as? ByteArray
+
+    companion object {
+        private const val REQ_SCREEN = 7301
+    }
 
     private fun asDouble(value: Any?): Double = when (value) {
         is Double -> value

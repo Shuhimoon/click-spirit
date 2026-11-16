@@ -39,6 +39,12 @@ type Engine struct {
 	picker     core.ScreenPicker
 	counting   bool
 	picking    bool
+	bubble     core.Bubble
+
+	video      core.VideoRecorder
+	videoPath  string
+	videoNote  string
+	videoStart time.Time
 
 	capturer   core.ScreenCapturer
 	hotkeyMu   sync.Mutex
@@ -108,9 +114,11 @@ func (e *Engine) Start(jsonStr string) error {
 		Sleep:    e.Sleep,
 		OnEvent:  e.onRunnerEvent,
 		Capturer: e.capturerLocked(),
+		Exclude:  e.inBubble,
 	}
 	e.runner = r
 	e.mu.Unlock()
+	e.syncBubble()
 
 	err = r.Start(context.Background(), script)
 	e.mu.Lock()
@@ -246,6 +254,14 @@ func (e *Engine) onRunnerEvent(ev core.Event) {
 	if overlay != nil {
 		overlay.ShowClick(ev.Step.X, ev.Step.Y, ClickLabel(ev))
 	}
+	// The runner clears its running flag only after the final event, so the
+	// event kind decides the bubble state here.
+	switch ev.Kind {
+	case core.EventStarted:
+		e.syncBubbleRunning(true)
+	case core.EventFinished, core.EventStopped, core.EventError, core.EventEmergencyStop:
+		e.syncBubbleRunning(false)
+	}
 	if hook != nil {
 		hook(ev)
 	}
@@ -305,6 +321,8 @@ func Message(ev core.Event) string {
 		return "開始執行"
 	case core.EventCountdown:
 		return CountdownLabel(ev.Remaining)
+	case core.EventExcluded:
+		return fmt.Sprintf("略過步驟 %d：(%d,%d) 在小浮窗上", ev.StepIndex+1, ev.Step.X, ev.Step.Y)
 	case core.EventStep:
 		return sprintfStep(ev.Step, ev.Repetition)
 	case core.EventLoopDone:

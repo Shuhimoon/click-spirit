@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../model/recording.dart';
 import '../model/script.dart';
+
+export '../model/recording.dart';
 
 class CursorPos {
   const CursorPos(this.x, this.y);
@@ -267,6 +270,31 @@ abstract class ClickEngine {
   /// (`circle`) on the real screen, and returns true screen coordinates.
   Future<PickOutcome> pickOnScreen(String mode);
 
+  /// Whether this platform has the always-on-top floating bubble (小浮窗):
+  /// Linux X11 and Android. Its buttons arrive as `bubble` events with
+  /// message `record`, `start`, or `stop`.
+  Future<bool> hasBubble();
+
+  /// Shows or hides the floating bubble.
+  Future<void> setBubbleVisible(bool on);
+
+  /// Whether a screen video backend exists (Linux with ffmpeg, Android).
+  Future<bool> hasVideoRecorder();
+
+  /// Starts 錄影轉腳本: clicks with timestamps plus a screen video saved to
+  /// [videoPath] when possible. An empty return means success.
+  Future<String> startScreenRecording(String videoPath);
+
+  /// Stops 錄影轉腳本 and returns the video path, a note and the clicks.
+  Future<ScreenRecordingResult> stopScreenRecording();
+
+  /// Writes a PNG thumbnail of [video] at [atMs] to [out]. Empty means success.
+  Future<String> videoFrame(String video, int atMs, String out, {int width = 240});
+
+  /// Builds script JSON from reviewed clicks: one point step per click and
+  /// the gaps as intervals. Returns `{"error":"..."}` on failure.
+  Future<String> clicksToScript(List<TimedClick> clicks, String name);
+
   void dispose();
 }
 
@@ -341,6 +369,28 @@ class UnavailableClickEngine implements ClickEngine {
 
   @override
   Future<PickOutcome> pickOnScreen(String mode) async => PickOutcome.failed('原生函式庫無法載入：$error');
+
+  @override
+  Future<bool> hasBubble() async => false;
+
+  @override
+  Future<void> setBubbleVisible(bool on) async {}
+
+  @override
+  Future<bool> hasVideoRecorder() async => false;
+
+  @override
+  Future<String> startScreenRecording(String videoPath) async => '原生函式庫無法載入：$error';
+
+  @override
+  Future<ScreenRecordingResult> stopScreenRecording() async => ScreenRecordingResult(error: '原生函式庫無法載入：$error');
+
+  @override
+  Future<String> videoFrame(String video, int atMs, String out, {int width = 240}) async => '原生函式庫無法載入：$error';
+
+  @override
+  Future<String> clicksToScript(List<TimedClick> clicks, String name) async =>
+      jsonEncode({'error': '原生函式庫無法載入：$error'});
 
   @override
   void dispose() {

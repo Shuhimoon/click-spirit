@@ -186,6 +186,31 @@ Wayland 或沒有 RECORD 時走 evdev。指標裝置要有 `BTN_LEFT`。evdev �
 
 腳本設定的「幾秒後開始此腳本」存成 `start_delay_s`（整數秒，0 = 立即開始，上限 3600）。舊腳本沒有這個欄位時一律視為 **3 秒**。按「開始」後先倒數：App 中央顯示大數字卡片，Linux X11 與 Android 的系統浮層也會在螢幕上方顯示同樣的倒數（就算關閉「顯示點擊位置」也會顯示）。倒數中按「停止」、卡片上的停止或緊急熱鍵都會取消，不會點下任何一下。舊欄位 `start_delay_ms` 仍保留，會在倒數之後再等待；錄製產生的腳本預設倒數 3 秒。
 
+### 小浮窗與腳本庫
+
+腳本設定裡的「顯示小浮窗」會在所有視窗上方放一個可拖曳的小圓點（設定會記住）。點一下展開三個按鈕：
+
+- **開始錄製／停止錄製**：再點一次停止，錄到的點擊存成新腳本，名稱是時間戳（例如「錄製 2026-11-16 22:01:06」），出現在「腳本庫」並載入編輯器。
+- **開始腳本**：執行在腳本庫按 ☆「設為預設」的腳本（存在 `settings.json` 的 `default_script`），一樣會先倒數 `start_delay_s`。
+- **停止腳本**：等同 App 的「停止」。
+
+小浮窗的範圍不會被錄進腳本（Go 的 `record.FilterExcluded` 丟掉從浮窗上按下的那一組 down/up），腳本執行時落在浮窗上的步驟會被略過並記一筆 `excluded` 事件（`Runner.Exclude`），浮窗本身不會被點到。錄製中圓點變紅，腳本執行中變藍。
+
+腳本庫是 App 支援資料夾下的 `scripts/*.json`，可以「開啟」「設為預設」「刪除」，或把目前的腳本「存入」。
+
+- **Linux X11**：override-redirect 視窗（XShape 圓角），每秒重新置頂；錄製用既有的 XRecord。
+- **Android**：無障礙服務畫的可觸控 `TYPE_ACCESSIBILITY_OVERLAY`。Android 沒有全域輸入鉤子，所以錄製用「可觸控的透明全螢幕浮層」：記下手指按下的位置與時間，接著把自己設成不可觸控、用 `dispatchGesture` 把同一下點擊（或滑動）重播給底下的 App，再恢復可觸控。小浮窗會重新加到錄製浮層之上，所以按浮窗不會被記錄。**只有點擊會變成步驟；滑動會照樣傳下去但不記錄。** 重播期間（約 0.1 秒）的第二根手指不會被記錄。需要 App 仍在背景執行，浮窗的「開始腳本／錄製」才會傳到 Flutter；App 被系統關掉時只剩「停止腳本」可用。
+- **Windows / macOS**：尚未實作（`platform/bubble_other.go` 是空殼，開關會顯示不可用）。
+
+### 錄影轉腳本
+
+控制列的「錄影轉腳本」同時錄下畫面與每一下點擊的位置與時間，按「停止錄影」後進入檢查畫面：每一下點擊列出影片縮圖（紅點標出位置）、時間碼、座標與到下一下的間隔，可以先刪掉不要的再「存成腳本」。每一下點擊變成一個點步驟，兩下之間（上一下放開到下一下按下）的時間變成步驟間隔。影片與腳本都會保留：影片在文件夾的 `click-spirit-recordings/錄影-時間.mp4`，腳本存進腳本庫。按「停止錄影」的那一下會自動去掉。
+
+- **Linux X11**：有 `ffmpeg` 時用 `ffmpeg -f x11grab`（15 fps、libx264）錄 mp4，縮圖也用 ffmpeg 擷取；沒有 `ffmpeg` 時只記錄點擊，檢查畫面會說明沒有影片。
+- **Android**：MediaProjection（每次都會跳系統授權）＋前景服務（type `mediaProjection`）＋ `MediaRecorder` 錄 mp4（長邊縮到 1280），點擊用上面那層可觸控錄製浮層記錄；縮圖用 `MediaMetadataRetriever`。影片放在 App 的私人資料夾。
+- **Windows / macOS**：尚未實作（`CS_HasVideoRecorder` 為 0，只能錄點擊的平台也還沒有全域滑鼠鉤子）。
+- 從匯入的 Android「顯示輕觸位置」影片偵測白點：尚未做。
+
 ### 緊急停止的平台實作
 
 - Linux，X11 連得上（cgo 且沒有 `-tags nox11`，`DISPLAY` 開得起來）：另一條 Display 連線上 `XGrabKey`，事件迴圈在自己的 goroutine。Caps Lock 與 Num Lock 的組合會一併抓住。
@@ -348,7 +373,7 @@ AAR 輸出到 `app/android/app/libs/clickspirit.aar`。Java 套件是 `com.click
   ```
 
   規則放進 `/etc/udev/rules.d/99-uinput.rules` 後重新載入 udev，或重新登入讓群組生效。沒有這個權限時，開裝置會失敗，錄製錯誤會說明要加入 `input` 群組。座標範圍要設 `CLICK_SPIRIT_SCREEN=WxH`。evdev 在 Wayland 上的座標是近似值。在同時有 `DISPLAY` 與 `WAYLAND_DISPLAY` 的 XWayland 環境，點擊、錄製與熱鍵預設仍走 X11。
-- **Android**：使用者要在系統設定裡啟用「點擊精靈」無障礙服務，且服務宣告 `canPerformGestures`。點擊是 `GestureDescription` 的點下手勢，不區分滑鼠左右鍵。清單裡已預留 `FOREGROUND_SERVICE` 與 `FOREGROUND_SERVICE_MEDIA_PROJECTION`，供之後的截圖使用；目前的 `ScreenCaptureHelper` 只有接上與釋放 MediaProjection 的空殼。
+- **Android**：使用者要在系統設定裡啟用「點擊精靈」無障礙服務，且服務宣告 `canPerformGestures`。點擊是 `GestureDescription` 的點下手勢，不區分滑鼠左右鍵。「錄影轉腳本」用 `FOREGROUND_SERVICE_MEDIA_PROJECTION` 的前景服務 `ScreenRecordService`，每次錄影系統都會要求授權。找圖用的 `ScreenCaptureHelper` 仍只是接上與釋放 MediaProjection 的空殼。
 
 介面是繁體中文。步驟可以新增、編輯、刪除、拖曳排序。桌面的「擷取座標」會倒數 3 秒再讀游標。Android 提供「開啟無障礙設定」與啟用狀態。腳本用系統檔案選擇器開啟與儲存。
 

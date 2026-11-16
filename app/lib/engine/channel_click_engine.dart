@@ -159,6 +159,52 @@ class ChannelClickEngine implements ClickEngine {
     }
   }
 
+  Future<bool> _boolCall(String method) async {
+    try {
+      return await _method.invokeMethod<bool>(method) ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// The accessibility service draws the bubble (TYPE_ACCESSIBILITY_OVERLAY).
+  @override
+  Future<bool> hasBubble() => _boolCall('hasBubble');
+
+  @override
+  Future<void> setBubbleVisible(bool on) async {
+    try {
+      await _method.invokeMethod<void>('setBubbleVisible', {'on': on});
+    } on PlatformException {
+      // Without the accessibility service there is no bubble.
+    } on MissingPluginException {
+      // Older native side.
+    }
+  }
+
+  /// MediaProjection + MediaRecorder; the system asks for consent each time.
+  @override
+  Future<bool> hasVideoRecorder() => _boolCall('hasVideoRecorder');
+
+  @override
+  Future<String> startScreenRecording(String videoPath) => _stringCall('startScreenRecording', {'path': videoPath});
+
+  @override
+  Future<ScreenRecordingResult> stopScreenRecording() async =>
+      ScreenRecordingResult.parse(await _stringCall('stopScreenRecording'));
+
+  @override
+  Future<String> videoFrame(String video, int atMs, String out, {int width = 240}) =>
+      _stringCall('videoFrame', {'video': video, 'at_ms': atMs, 'out': out, 'width': width});
+
+  @override
+  Future<String> clicksToScript(List<TimedClick> clicks, String name) => _stringCall('clicksToScript', {
+        'clicks': jsonEncode(clicks.map((e) => e.toJson()).toList()),
+        'name': name,
+      });
+
   @override
   void dispose() {}
 }

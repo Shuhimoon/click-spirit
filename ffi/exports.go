@@ -40,6 +40,12 @@ func shared() *engine.Engine {
 			if p, pErr := platform.NewScreenPicker(); pErr == nil {
 				sharedEng.SetPicker(p)
 			}
+			if b, bErr := platform.NewBubble(); bErr == nil {
+				sharedEng.SetBubble(b)
+			}
+			if v, vErr := platform.NewVideoRecorder(); vErr == nil {
+				sharedEng.SetVideoRecorder(v)
+			}
 		}
 	})
 	return sharedEng
@@ -257,4 +263,72 @@ func CS_HasScreenPicker() C.int {
 		return 1
 	}
 	return 0
+}
+
+// CS_HasBubble returns 1 when the floating bubble (小浮窗) exists here.
+//
+//export CS_HasBubble
+func CS_HasBubble() C.int {
+	if shared().HasBubble() {
+		return 1
+	}
+	return 0
+}
+
+// CS_SetBubbleVisible shows (1) or hides (0) the floating bubble. Presses on
+// its buttons arrive as "bubble" events with message record/start/stop.
+//
+//export CS_SetBubbleVisible
+func CS_SetBubbleVisible(on C.int) {
+	shared().ShowBubble(on != 0)
+}
+
+// CS_HasVideoRecorder returns 1 when screen video recording works here.
+//
+//export CS_HasVideoRecorder
+func CS_HasVideoRecorder() C.int {
+	if shared().HasVideoRecorder() {
+		return 1
+	}
+	return 0
+}
+
+// CS_StartScreenRecording starts 錄影轉腳本: clicks with timestamps plus a
+// screen video at videoPath when a backend exists. Returns "" or an error.
+//
+//export CS_StartScreenRecording
+func CS_StartScreenRecording(videoPath *C.char) *C.char {
+	if err := shared().StartScreenRecording(goString(videoPath)); err != nil {
+		return cString(err.Error())
+	}
+	return cString("")
+}
+
+// CS_StopScreenRecording returns JSON {video, note, clicks:[{x,y,button,at_ms,hold_ms}], error}.
+//
+//export CS_StopScreenRecording
+func CS_StopScreenRecording() *C.char {
+	return cString(shared().StopScreenRecording())
+}
+
+// CS_VideoFrame writes a PNG thumbnail of video at atMs. Returns "" or an error.
+//
+//export CS_VideoFrame
+func CS_VideoFrame(video *C.char, atMs C.longlong, out *C.char, width C.int) *C.char {
+	if err := platform.VideoFrame(goString(video), int64(atMs), goString(out), int(width)); err != nil {
+		return cString(err.Error())
+	}
+	return cString("")
+}
+
+// CS_ClicksToScript turns reviewed clicks JSON into script JSON. On failure
+// it returns "error: ...".
+//
+//export CS_ClicksToScript
+func CS_ClicksToScript(clicks, name *C.char) *C.char {
+	s, err := engine.ClicksToScript(goString(clicks), goString(name))
+	if err != nil {
+		return cString("error: " + err.Error())
+	}
+	return cString(s)
 }

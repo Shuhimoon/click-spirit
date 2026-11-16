@@ -28,6 +28,12 @@
             android:name="flutterEmbedding"
             android:value="2"/>
 
+        <!-- 錄影轉腳本: MediaProjection + MediaRecorder mp4. -->
+        <service
+            android:name=".ScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
+
         <service
             android:name=".ClickAccessibilityService"
             android:exported="true"

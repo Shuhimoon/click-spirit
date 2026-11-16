@@ -561,3 +561,19 @@ func TestCountdownReachesListenerAndOverlay(t *testing.T) {
 		t.Fatalf("clicks %v", l.clicks)
 	}
 }
+
+func TestBubbleRectAndClicksToScript(t *testing.T) {
+	SetBubbleRect(10, 10, 50, 50, true)
+	defer SetBubbleRect(0, 0, 0, 0, false)
+	if r, ok := bubble.Rect(); !ok || !r.Contains(30, 30) || r.Contains(70, 30) {
+		t.Fatalf("rect %+v %v", r, ok)
+	}
+	js, err := ClicksToScript(`[{"x":5,"y":6,"button":"left","at_ms":0,"hold_ms":40},{"x":7,"y":8,"button":"left","at_ms":1040,"hold_ms":40}]`, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := core.Unmarshal([]byte(js))
+	if err != nil || len(s.Steps) != 2 || s.Steps[0].IntervalMs != 1000 {
+		t.Fatalf("script %v %s", err, js)
+	}
+}

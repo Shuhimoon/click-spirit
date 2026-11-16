@@ -105,6 +105,62 @@ class FakeClickEngine implements ClickEngine {
     return pickResult;
   }
 
+  bool bubble = false;
+  final List<bool> bubbleVisibleCalls = [];
+  bool video = true;
+  String startScreenResult = '';
+  final List<String> screenPaths = [];
+  ScreenRecordingResult screenResult = const ScreenRecordingResult();
+  final List<List<TimedClick>> converted = [];
+
+  @override
+  Future<bool> hasBubble() async => bubble;
+
+  @override
+  Future<void> setBubbleVisible(bool on) async => bubbleVisibleCalls.add(on);
+
+  @override
+  Future<bool> hasVideoRecorder() async => video;
+
+  @override
+  Future<String> startScreenRecording(String videoPath) async {
+    screenPaths.add(videoPath);
+    return startScreenResult;
+  }
+
+  @override
+  Future<ScreenRecordingResult> stopScreenRecording() async => screenResult;
+
+  @override
+  Future<String> videoFrame(String video, int atMs, String out, {int width = 240}) async => 'no video in tests';
+
+  /// Mirrors the Go conversion closely enough for widget tests.
+  @override
+  Future<String> clicksToScript(List<TimedClick> clicks, String name) async {
+    converted.add(List.of(clicks));
+    final steps = <Map<String, Object?>>[];
+    for (var i = 0; i < clicks.length; i++) {
+      final c = clicks[i];
+      final gap = i + 1 < clicks.length ? clicks[i + 1].atMs - c.atMs - c.holdMs : 500;
+      steps.add({
+        'x': c.x,
+        'y': c.y,
+        'button': c.button,
+        'clicks': 1,
+        'interval_ms': gap < 1 ? 1 : gap,
+        'hold_ms': c.holdMs,
+      });
+    }
+    return jsonEncode({
+      'version': 1,
+      'name': name.isEmpty ? '錄影腳本' : name,
+      'steps': steps,
+      'repeat': 1,
+      'default_interval_ms': 500,
+      'start_delay_s': 3,
+    });
+  }
+
   @override
   void dispose() {
     if (!_events.isClosed) _events.close();

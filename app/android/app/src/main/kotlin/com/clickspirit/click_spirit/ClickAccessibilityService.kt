@@ -61,7 +61,13 @@ class ClickAccessibilityService : AccessibilityService(), GestureDispatcher, Cli
             } catch (ignored: Throwable) {
             }
         }
-        mainHandler.post { detachOverlay() }
+        mainHandler.post {
+            detachOverlay()
+            bubble?.hide()
+            bubble = null
+            tapRecorder?.detach()
+            tapRecorder = null
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -87,6 +93,75 @@ class ClickAccessibilityService : AccessibilityService(), GestureDispatcher, Cli
             mainHandler.removeCallbacks(removeOverlay)
             view.setCountdown(seconds.toInt())
         }
+    }
+
+    private var bubble: BubbleOverlay? = null
+    private var tapRecorder: TapRecorderOverlay? = null
+
+    /** 小浮窗 on/off. Safe from any thread. */
+    fun setBubbleVisible(on: Boolean) {
+        mainHandler.post {
+            if (on) {
+                val b = bubble ?: BubbleOverlay(
+                    this,
+                    onAction = { action -> onBubbleAction(action) },
+                    onRect = { x, y, w, h, visible ->
+                        try {
+                            Mobile.setBubbleRect(x.toLong(), y.toLong(), w.toLong(), h.toLong(), visible)
+                        } catch (ignored: Throwable) {
+                        }
+                    },
+                ).also { bubble = it }
+                b.recording = tapRecorder != null
+                b.show()
+            } else {
+                bubble?.hide()
+            }
+        }
+    }
+
+    private fun onBubbleAction(action: String) {
+        val listener = bubbleListener
+        if (listener != null) {
+            listener(action)
+        } else if (action == "stop") {
+            // The app is gone; stopping still works without it.
+            Thread { Mobile.stop() }.start()
+        }
+    }
+
+    /** Colours the bubble blue while a script runs. */
+    fun setBubbleRunning(running: Boolean) {
+        mainHandler.post { bubble?.running = running }
+    }
+
+    val isTapRecording: Boolean
+        get() = tapRecorder != null
+
+    /**
+     * Starts the tap-through recorder overlay (see [TapRecorderOverlay]).
+     * Taps are timed from [startUptime] (SystemClock.uptimeMillis). Main thread.
+     */
+    fun startTapRecording(startUptime: Long): Boolean {
+        if (tapRecorder != null) return true
+        val rec = TapRecorderOverlay(this, startUptime)
+        if (!rec.attach()) return false
+        tapRecorder = rec
+        // Keep the bubble above the recorder so its presses are not recorded.
+        bubble?.let {
+            it.recording = true
+            it.raise()
+        }
+        return true
+    }
+
+    /** Stops the recorder and returns the taps as JSON, or null. Main thread. */
+    fun stopTapRecording(): String? {
+        val rec = tapRecorder ?: return null
+        tapRecorder = null
+        rec.detach()
+        bubble?.recording = false
+        return rec.tapsJson()
     }
 
     private var picker: ScreenPickOverlay? = null
@@ -237,5 +312,9 @@ class ClickAccessibilityService : AccessibilityService(), GestureDispatcher, Cli
         @Volatile
         var instance: ClickAccessibilityService? = null
             private set
+
+        /** Set by MainActivity: bubble button presses go to Flutter. */
+        @Volatile
+        var bubbleListener: ((String) -> Unit)? = null
     }
 }

@@ -11,11 +11,13 @@ import 'package:path_provider/path_provider.dart';
 import '../engine/click_engine.dart';
 import '../model/app_settings.dart';
 import '../model/script.dart';
+import '../model/script_library.dart';
 import 'glass.dart';
 import 'markers.dart';
 import 'step_dialog.dart';
 import 'step_list.dart';
 import 'theme.dart';
+import 'video_review_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -25,7 +27,11 @@ class HomePage extends StatefulWidget {
     required this.enableAccessibility,
     this.settings,
     this.initialScript,
+    this.library,
   });
+
+  /// 腳本庫. Null stores scripts as JSON files in the app support directory.
+  final ScriptLibrary? library;
 
   /// Script shown at launch. Null shows the built-in sample.
   final Script? initialScript;
@@ -74,6 +80,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final SettingsStore _store = widget.settings ?? FileSettingsStore();
   bool _showClicks = true;
   bool _hasOverlay = false;
+  late final ScriptLibrary _library = widget.library ?? FileScriptLibrary();
+  AppSettings _settings = const AppSettings();
+  List<LibraryEntry> _entries = const [];
+  bool _hasBubble = false;
+  bool _hasVideo = false;
+  bool _screenRecording = false;
+  DateTime? _screenStartedAt;
   ClickMark? _lastClick;
   int _clickSerial = 0;
 
@@ -101,15 +114,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _loadSettings() async {
     final settings = await _store.load();
     var overlay = false;
+    var bubble = false;
+    var video = false;
     try {
       overlay = await widget.engine.hasClickOverlay();
+      bubble = await widget.engine.hasBubble();
+      video = await widget.engine.hasVideoRecorder();
     } catch (_) {}
     if (!mounted) return;
     setState(() {
+      _settings = settings;
       _showClicks = settings.showClicks;
       _hasOverlay = overlay;
+      _hasBubble = bubble;
+      _hasVideo = video;
     });
     await widget.engine.setShowClicks(settings.showClicks);
+    if (bubble && settings.showBubble) await widget.engine.setBubbleVisible(true);
+    await _refreshLibrary();
+  }
+
+  Future<void> _saveSettings(AppSettings next) async {
+    setState(() => _settings = next);
+    await _store.save(next);
   }
 
   Future<void> _setShowClicks(bool on) async {
@@ -118,7 +145,149 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!on) _lastClick = null;
     });
     await widget.engine.setShowClicks(on);
-    await _store.save(AppSettings(showClicks: on));
+    await _saveSettings(_settings.copyWith(showClicks: on));
+  }
+
+  Future<void> _setShowBubble(bool on) async {
+    await widget.engine.setBubbleVisible(on);
+    await _saveSettings(_settings.copyWith(showBubble: on));
+    if (!mounted) return;
+    setState(() => _status = on ? '小浮窗已顯示' : '小浮窗已隱藏');
+  }
+
+  Future<void> _refreshLibrary() async {
+    final list = await _library.list();
+    if (!mounted) return;
+    setState(() => _entries = list);
+  }
+
+  Future<String?> _saveToLibrary(Script script, {String? status}) async {
+    try {
+      final id = await _library.save(script);
+      await _refreshLibrary();
+      if (mounted && status != null) setState(() => _status = status);
+      return id;
+    } catch (e) {
+      if (mounted) setState(() => _status = '無法存入腳本庫：$e');
+      return null;
+    }
+  }
+
+  Future<void> _openFromLibrary(LibraryEntry entry) async {
+    final script = await _library.load(entry.id);
+    if (!mounted) return;
+    setState(() {
+      if (script == null) {
+        _status = '無法開啟「${entry.name}」';
+      } else {
+        _apply(script);
+        _status = '已開啟「${entry.name}」';
+      }
+    });
+  }
+
+  Future<void> _setDefault(LibraryEntry entry) async {
+    await _saveSettings(_settings.copyWith(defaultScript: entry.id));
+    if (!mounted) return;
+    setState(() => _status = '預設腳本：${entry.name}（小浮窗的「開始腳本」會執行它）');
+  }
+
+  Future<void> _deleteFromLibrary(LibraryEntry entry) async {
+    await _library.delete(entry.id);
+    if (_settings.defaultScript == entry.id) await _saveSettings(_settings.copyWith(defaultScript: ''));
+    await _refreshLibrary();
+    if (!mounted) return;
+    setState(() => _status = '已刪除「${entry.name}」');
+  }
+
+  /// Floating bubble buttons (also used by tests through `bubble` events).
+  Future<void> _onBubble(String action) async {
+    switch (action) {
+      case 'record':
+        if (_recording) {
+          await _stopRecording();
+        } else if (!_running && !_screenRecording) {
+          await _startRecording();
+        }
+      case 'start':
+        await _runDefault();
+      case 'stop':
+        await _stop();
+    }
+  }
+
+  /// 開始腳本 from the bubble: loads the default script and starts it (with
+  /// its start delay).
+  Future<void> _runDefault() async {
+    if (_running || _recording || _screenRecording) return;
+    final id = _settings.defaultScript;
+    if (id.isEmpty) {
+      setState(() => _status = '尚未設定預設腳本：在腳本庫按「設為預設」');
+      return;
+    }
+    final script = await _library.load(id);
+    if (!mounted) return;
+    if (script == null) {
+      setState(() => _status = '找不到預設腳本，請重新設定');
+      return;
+    }
+    setState(() => _apply(script));
+    await _start();
+  }
+
+  Future<void> _startVideo() async {
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final stamp = '${now.year}${two(now.month)}${two(now.day)}-${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    var path = '';
+    if (_hasVideo) {
+      try {
+        final base = await _documentsDir() ?? (await getApplicationSupportDirectory()).path;
+        final dir = Directory('$base${Platform.pathSeparator}click-spirit-recordings');
+        await dir.create(recursive: true);
+        path = '${dir.path}${Platform.pathSeparator}錄影-$stamp.mp4';
+      } catch (_) {}
+    }
+    final err = await widget.engine.startScreenRecording(path);
+    if (!mounted) return;
+    setState(() {
+      if (err.isNotEmpty) {
+        _status = '無法開始錄影：$err';
+      } else {
+        _screenRecording = true;
+        _screenStartedAt = DateTime.now();
+        _status = path.isEmpty ? '錄影中（只記錄點擊位置與時間，沒有錄影後端）' : '錄影中：點擊畫面上的目標，完成後按「停止錄影」';
+      }
+    });
+  }
+
+  Future<void> _stopVideo() async {
+    final stoppedAt = DateTime.now();
+    final raw = await widget.engine.stopScreenRecording();
+    if (!mounted) return;
+    final started = _screenStartedAt;
+    final result = started == null ? raw : dropStopClick(raw, stoppedAt.difference(started).inMilliseconds);
+    setState(() => _screenRecording = false);
+    if (result.error.isNotEmpty && result.clicks.isEmpty) {
+      setState(() => _status = '錄影失敗：${result.error}');
+      return;
+    }
+    final script = await showVideoReview(
+      context,
+      engine: widget.engine,
+      recording: result,
+      name: timestampName('錄影', DateTime.now()),
+    );
+    if (!mounted) return;
+    if (script == null) {
+      setState(() => _status = result.hasVideo ? '已取消；影片保留在 ${result.video}' : '已取消錄影轉腳本');
+      return;
+    }
+    setState(() => _apply(script));
+    await _saveToLibrary(
+      script,
+      status: result.hasVideo ? '已存成腳本「${script.name}」，影片：${result.video}' : '已存成腳本「${script.name}」',
+    );
   }
 
   @override
@@ -239,11 +408,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _running = false;
           _activeStep = null;
           _status = ev.message.isEmpty ? '錯誤' : ev.message;
+        case 'bubble':
+          // Handled below, outside setState.
+          break;
         default:
           break;
       }
     });
     _scrollLog();
+    if (ev.kind == 'bubble') _onBubble(ev.message);
   }
 
   void _scrollLog() {
@@ -475,11 +648,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         });
         return;
       }
+      final name = timestampName('錄製', DateTime.now());
       setState(() {
         _apply(script);
+        _name.text = name;
         _recording = false;
         _status = '已載入錄製腳本';
       });
+      // Every recording becomes a new script in the 腳本庫.
+      await _saveToLibrary(_current(), status: '已錄製並存入腳本庫：$name');
     } catch (e) {
       setState(() {
         _recording = false;
@@ -793,6 +970,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             )),
             box(GlassTextField(controller: _hotkey, label: '緊急停止熱鍵')),
             box(_showClicksTile(), full: true),
+            box(_bubbleTile(), full: true),
+            box(_libraryCard(), full: true),
           ],
         );
       },
@@ -829,6 +1008,128 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           onChanged: _setShowClicks,
         ),
       ],
+    );
+  }
+
+  Widget _bubbleTile() {
+    final secondary = ClickSpiritColors.secondary(context);
+    final detail = _hasBubble
+        ? '常駐在所有視窗上方、可拖曳的小圓點；點一下展開：開始錄製（再點停止並存成新腳本）、開始腳本（執行預設腳本）、停止腳本。腳本不會點到它，錄製也不會記錄它。'
+        : '此平台目前沒有小浮窗（Linux X11 與 Android 才有）。';
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '顯示小浮窗',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600, height: 1.3, color: ClickSpiritColors.label(context)),
+              ),
+              const SizedBox(height: 2),
+              Text(detail, style: TextStyle(fontSize: 12, height: 1.35, color: secondary)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Switch(
+          key: const Key('show-bubble-switch'),
+          value: _hasBubble && _settings.showBubble,
+          onChanged: _hasBubble ? _setShowBubble : null,
+        ),
+      ],
+    );
+  }
+
+  /// 腳本庫: saved scripts with 開啟 / 設為預設 / 刪除.
+  Widget _libraryCard() {
+    final secondary = ClickSpiritColors.secondary(context);
+    final label = ClickSpiritColors.label(context);
+    return Container(
+      key: const Key('library-card'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+      decoration: BoxDecoration(
+        color: ClickSpiritColors.systemBlue.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('腳本庫', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: label)),
+              ),
+              TextButton.icon(
+                key: const Key('library-save'),
+                onPressed: () => _saveToLibrary(_current(), status: '已存入腳本庫：${_current().name}'),
+                icon: const Icon(Icons.library_add_outlined, size: 18),
+                label: const Text('存入目前腳本'),
+              ),
+            ],
+          ),
+          if (_entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text('還沒有腳本。錄製的腳本會自動存進來。', style: TextStyle(fontSize: 12, color: secondary)),
+            ),
+          for (final e in _entries) _libraryRow(e),
+        ],
+      ),
+    );
+  }
+
+  Widget _libraryRow(LibraryEntry e) {
+    final isDefault = e.id == _settings.defaultScript;
+    final secondary = ClickSpiritColors.secondary(context);
+    return Padding(
+      key: Key('library-row-${e.name}'),
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            isDefault ? Icons.star_rounded : Icons.description_outlined,
+            size: 18,
+            color: isDefault ? ClickSpiritColors.systemOrange : secondary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(e.name,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ClickSpiritColors.label(context))),
+                Text(isDefault ? '${e.steps} 步 · 預設' : '${e.steps} 步',
+                    style: TextStyle(fontSize: 11, color: secondary)),
+              ],
+            ),
+          ),
+          IconButton(
+            key: Key('library-open-${e.name}'),
+            tooltip: '開啟',
+            visualDensity: VisualDensity.compact,
+            onPressed: _running ? null : () => _openFromLibrary(e),
+            icon: const Icon(Icons.edit_note_rounded, size: 20),
+          ),
+          IconButton(
+            key: Key('library-default-${e.name}'),
+            tooltip: isDefault ? '已是預設' : '設為預設',
+            visualDensity: VisualDensity.compact,
+            onPressed: isDefault ? null : () => _setDefault(e),
+            icon: Icon(isDefault ? Icons.star_rounded : Icons.star_outline_rounded, size: 20),
+          ),
+          IconButton(
+            key: Key('library-delete-${e.name}'),
+            tooltip: '刪除',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _deleteFromLibrary(e),
+            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: ClickSpiritColors.systemRed),
+          ),
+        ],
+      ),
     );
   }
 
@@ -898,7 +1199,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _controlBar() {
-    final busy = _running || _recording;
+    final busy = _running || _recording || _screenRecording;
     final neutral = ClickSpiritColors.isDark(context) ? const Color(0xFFE5E5EA) : const Color(0xFF1C1C1E);
     return GlassPanel(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -937,6 +1238,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onPressed: _recording ? _stopRecording : null,
             icon: Icons.stop_circle_outlined,
             label: '停止錄製',
+            variant: GlassButtonVariant.tinted,
+            color: ClickSpiritColors.systemRed,
+          ),
+          GlassButton(
+            key: const Key('video-record'),
+            onPressed: _screenRecording ? _stopVideo : (busy ? null : _startVideo),
+            icon: _screenRecording ? Icons.stop_circle_outlined : Icons.videocam_outlined,
+            label: _screenRecording ? '停止錄影' : '錄影轉腳本',
             variant: GlassButtonVariant.tinted,
             color: ClickSpiritColors.systemRed,
           ),

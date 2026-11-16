@@ -24,6 +24,8 @@ type Options struct {
 	DoubleClickMs int
 	MoveTolerance int
 	Name          string
+	// Exclude drops clicks whose press lands inside any rect (the bubble).
+	Exclude []core.Rect
 }
 
 type action struct {
@@ -41,6 +43,15 @@ type action struct {
 func ToScript(events []Event, opt Options) (*core.Script, error) {
 	opt = normalize(opt)
 	actions := clicksFrom(events)
+	if len(opt.Exclude) > 0 {
+		kept := actions[:0]
+		for _, a := range actions {
+			if !core.AnyContains(opt.Exclude, a.x, a.y) {
+				kept = append(kept, a)
+			}
+		}
+		actions = kept
+	}
 	if len(actions) == 0 {
 		return nil, errors.New("recording has no clicks")
 	}

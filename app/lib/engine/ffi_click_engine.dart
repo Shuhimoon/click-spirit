@@ -24,6 +24,10 @@ typedef _MatchNative = Pointer<Utf8> Function(Pointer<Utf8>, Double);
 typedef _MatchDart = Pointer<Utf8> Function(Pointer<Utf8>, double);
 typedef _IntInNative = Void Function(Int32);
 typedef _IntInDart = void Function(int);
+typedef _FrameNative = Pointer<Utf8> Function(Pointer<Utf8>, Int64, Pointer<Utf8>, Int32);
+typedef _FrameDart = Pointer<Utf8> Function(Pointer<Utf8>, int, Pointer<Utf8>, int);
+typedef _Str2Native = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _Str2Dart = Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>);
 
 /// Loads click_spirit.dll, libclick_spirit.dylib, or libclick_spirit.so
 /// and polls [CS_PollEvent]. On Linux the shared library is the bundle's
@@ -51,6 +55,13 @@ class FfiClickEngine implements ClickEngine {
     _hasOverlay = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasClickOverlay');
     _startPick = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_StartPick');
     _hasPicker = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasScreenPicker');
+    _hasBubble = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasBubble');
+    _setBubble = _lib.lookupFunction<_IntInNative, _IntInDart>('CS_SetBubbleVisible');
+    _hasVideo = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasVideoRecorder');
+    _startScreenRec = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_StartScreenRecording');
+    _stopScreenRec = _lib.lookupFunction<_StrNative, _StrDart>('CS_StopScreenRecording');
+    _videoFrame = _lib.lookupFunction<_FrameNative, _FrameDart>('CS_VideoFrame');
+    _clicksToScript = _lib.lookupFunction<_Str2Native, _Str2Dart>('CS_ClicksToScript');
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _pollOnce());
   }
 
@@ -73,6 +84,13 @@ class FfiClickEngine implements ClickEngine {
   late final _MatchDart _match;
   late final _FreeDart _free;
   late final _IntInDart _setShowClicks;
+  late final _IntDart _hasBubble;
+  late final _IntInDart _setBubble;
+  late final _IntDart _hasVideo;
+  late final _StrInDart _startScreenRec;
+  late final _StrDart _stopScreenRec;
+  late final _FrameDart _videoFrame;
+  late final _Str2Dart _clicksToScript;
   late final _IntDart _hasOverlay;
   late final _StrInDart _startPick;
   late final _IntDart _hasPicker;
@@ -259,6 +277,46 @@ class FfiClickEngine implements ClickEngine {
           await _window.invokeMethod<bool>('show');
         } catch (_) {}
       }
+    }
+  }
+
+  @override
+  Future<bool> hasBubble() async => _hasBubble() != 0;
+
+  @override
+  Future<void> setBubbleVisible(bool on) async => _setBubble(on ? 1 : 0);
+
+  @override
+  Future<bool> hasVideoRecorder() async => _hasVideo() != 0;
+
+  @override
+  Future<String> startScreenRecording(String videoPath) async => _callIn(_startScreenRec, videoPath);
+
+  @override
+  Future<ScreenRecordingResult> stopScreenRecording() async => ScreenRecordingResult.parse(_take(_stopScreenRec()));
+
+  @override
+  Future<String> videoFrame(String video, int atMs, String out, {int width = 240}) async {
+    final v = video.toNativeUtf8();
+    final o = out.toNativeUtf8();
+    try {
+      return _take(_videoFrame(v, atMs, o, width));
+    } finally {
+      calloc.free(v);
+      calloc.free(o);
+    }
+  }
+
+  @override
+  Future<String> clicksToScript(List<TimedClick> clicks, String name) async {
+    final c = jsonEncode(clicks.map((e) => e.toJson()).toList()).toNativeUtf8();
+    final n = name.toNativeUtf8();
+    try {
+      final out = _take(_clicksToScript(c, n));
+      return out.startsWith('error: ') ? jsonEncode({'error': out.substring(7)}) : out;
+    } finally {
+      calloc.free(c);
+      calloc.free(n);
     }
   }
 

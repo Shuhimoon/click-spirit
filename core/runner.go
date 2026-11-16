@@ -34,6 +34,9 @@ const (
 	// EventCountdown is emitted once per second before the first click while
 	// the start delay counts down. Remaining is the seconds left (N..1).
 	EventCountdown EventKind = "countdown"
+	// EventExcluded is emitted instead of a click when the target lies inside
+	// an excluded area (the floating bubble). Step.X and Step.Y hold the point.
+	EventExcluded EventKind = "excluded"
 )
 
 // ErrNoCapturer is returned when an image step runs without a ScreenCapturer.
@@ -78,6 +81,7 @@ type flight struct {
 	onEvent  func(Event)
 	rand     func() float64
 	now      func() time.Time
+	exclude  func(x, y int) bool
 }
 
 type runState struct {
@@ -103,6 +107,9 @@ type Runner struct {
 	Rand     func() float64
 	Capturer ScreenCapturer
 	Now      func() time.Time
+	// Exclude, when set, is asked before every click; true skips the click
+	// (EventExcluded) so scripts never press the floating bubble.
+	Exclude func(x, y int) bool
 
 	mu      sync.Mutex
 	running bool
@@ -205,6 +212,7 @@ func (r *Runner) begin(cancel context.CancelFunc) (flight, error) {
 		onEvent:  r.OnEvent,
 		rand:     r.Rand,
 		now:      r.Now,
+		exclude:  r.Exclude,
 	}
 	if f.sleep == nil {
 		f.sleep = defaultSleep
@@ -286,6 +294,10 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 				shown := step
 				if !skip {
 					shown.X, shown.Y = x, y
+				}
+				if !skip && f.exclude != nil && f.exclude(x, y) {
+					skip = true
+					f.emit(Event{Kind: EventExcluded, Loop: loop, StepIndex: i, Repetition: rep, Repeats: reps, Step: shown})
 				}
 				f.emit(Event{Kind: EventStep, Loop: loop, StepIndex: i, Repetition: rep, Repeats: reps, Step: shown})
 				if !skip {

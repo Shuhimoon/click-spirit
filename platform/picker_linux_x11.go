@@ -308,6 +308,15 @@ static int csPickRun(int circle, int timeoutMs, int *out) {
 	return rc;
 }
 
+static void pkScreenSize(int *w, int *h) {
+	Display *d = XOpenDisplay(NULL);
+	*w = 0; *h = 0;
+	if (d == NULL) return;
+	*w = DisplayWidth(d, DefaultScreen(d));
+	*h = DisplayHeight(d, DefaultScreen(d));
+	XCloseDisplay(d);
+}
+
 // Test helpers: drive the picker through XTest on the private test display.
 static int pkFake(int kind, int a, int b) {
 	Display *d = XOpenDisplay(NULL);
@@ -426,4 +435,11 @@ func boolInt(b bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+// screenSize is the root window size of $DISPLAY (0, 0 when unavailable).
+func screenSize() (int, int) {
+	var w, h C.int
+	C.pkScreenSize(&w, &h)
+	return int(w), int(h)
 }

@@ -105,7 +105,11 @@ func (e *Engine) StartRecording() error {
 	if err != nil {
 		return err
 	}
-	return e.StartRecordingWith(src)
+	if err := e.StartRecordingWith(src); err != nil {
+		return err
+	}
+	e.syncBubble()
+	return nil
 }
 
 // StartRecordingWith records from src until StopRecording.
@@ -119,6 +123,12 @@ func (e *Engine) StartRecordingWith(src record.InputSource) error {
 		return errors.New("already recording")
 	}
 	rec := record.New()
+	if b := e.bubble; b != nil {
+		src = &filteredSource{src: src, filter: &record.FilterExcluded{Exclude: func(x, y int) bool {
+			r, ok := b.Rect()
+			return ok && r.Contains(x, y)
+		}}}
+	}
 	if err := rec.Start(src); err != nil {
 		return err
 	}
@@ -147,6 +157,7 @@ func (e *Engine) StopRecording() (string, error) {
 		return "", errors.New("not recording")
 	}
 	rec.Stop()
+	e.syncBubble()
 	script, err := record.ToScript(rec.Events(), opt)
 	if err != nil {
 		return "", err
