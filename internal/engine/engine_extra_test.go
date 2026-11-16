@@ -24,7 +24,7 @@ func TestEngineStepRepetitionAndHotkeyFieldIgnored(t *testing.T) {
 	f := &fakeClicker{}
 	e := New(f, nil)
 	e.Sleep = instant
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version:         1,
 		Repeat:          1,
 		EmergencyHotkey: "F12",
@@ -84,7 +84,7 @@ func TestEngineEmergencyHotkey(t *testing.T) {
 	if err := e.SetHotkey(core.DefaultHotkey); err != nil {
 		t.Fatal(err)
 	}
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version:      1,
 		Repeat:       0,
 		StartDelayMs: 60_000,

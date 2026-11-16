@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
 
 import 'click_engine.dart';
 
@@ -49,6 +49,8 @@ class FfiClickEngine implements ClickEngine {
     _free = _lib.lookupFunction<_FreeNative, _FreeDart>('CS_FreeString');
     _setShowClicks = _lib.lookupFunction<_IntInNative, _IntInDart>('CS_SetShowClicks');
     _hasOverlay = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasClickOverlay');
+    _startPick = _lib.lookupFunction<_StrInNative, _StrInDart>('CS_StartPick');
+    _hasPicker = _lib.lookupFunction<_IntNative, _IntDart>('CS_HasScreenPicker');
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _pollOnce());
   }
 
@@ -72,6 +74,9 @@ class FfiClickEngine implements ClickEngine {
   late final _FreeDart _free;
   late final _IntInDart _setShowClicks;
   late final _IntDart _hasOverlay;
+  late final _StrInDart _startPick;
+  late final _IntDart _hasPicker;
+  static const MethodChannel _window = MethodChannel('click_spirit/window');
   late final Timer _timer;
   final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
 
@@ -222,6 +227,40 @@ class FfiClickEngine implements ClickEngine {
 
   @override
   Future<bool> hasClickOverlay() async => _hasOverlay() != 0;
+
+  @override
+  Future<bool> hasScreenPicker() async => _hasPicker() != 0;
+
+  /// Hides the window (Linux runner channel), waits for the compositor to
+  /// drop it from the screen, starts the native picker, and waits for its
+  /// single result event. The window comes back whatever happens.
+  @override
+  Future<PickOutcome> pickOnScreen(String mode) async {
+    final result = events.firstWhere((e) => isPickEvent(e.kind)).timeout(const Duration(minutes: 3));
+    var hidden = false;
+    try {
+      hidden = await _window.invokeMethod<bool>('hide') ?? false;
+    } catch (_) {
+      // No window channel on this runner: pick with the window visible.
+    }
+    try {
+      if (hidden) await Future<void>.delayed(const Duration(milliseconds: 400));
+      final err = _callIn(_startPick, mode);
+      if (err.isNotEmpty) {
+        result.ignore();
+        return PickOutcome.failed(err);
+      }
+      return PickOutcome.fromEvent(await result);
+    } on TimeoutException {
+      return const PickOutcome.failed('選取逾時');
+    } finally {
+      if (hidden) {
+        try {
+          await _window.invokeMethod<bool>('show');
+        } catch (_) {}
+      }
+    }
+  }
 
   @override
   void dispose() {

@@ -14,6 +14,33 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// "click_spirit/window": hide the window before an on-screen pick so the
+// screenshot shows what is underneath, then show it again where it was.
+static gint saved_x = 0, saved_y = 0;
+static gboolean saved_pos = FALSE;
+
+static void window_method_cb(FlMethodChannel* channel, FlMethodCall* call,
+                             gpointer user_data) {
+  GtkWindow* window = GTK_WINDOW(user_data);
+  const gchar* method = fl_method_call_get_name(call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(method, "hide") == 0) {
+    gtk_window_get_position(window, &saved_x, &saved_y);
+    saved_pos = TRUE;
+    gtk_widget_hide(GTK_WIDGET(window));
+    gdk_display_sync(gtk_widget_get_display(GTK_WIDGET(window)));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
+  } else if (g_strcmp0(method, "show") == 0) {
+    if (saved_pos) gtk_window_move(window, saved_x, saved_y);
+    gtk_widget_show(GTK_WIDGET(window));
+    gtk_window_present(window);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  fl_method_call_respond(call, response, nullptr);
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -74,6 +101,16 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  FlMethodChannel* window_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "click_spirit/window", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(window_channel, window_method_cb,
+                                            window, nullptr);
+  // Keep the channel alive with the window.
+  g_object_set_data_full(G_OBJECT(window), "click-spirit-window-channel",
+                         window_channel, g_object_unref);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

@@ -7,3 +7,10 @@ package core
 type ClickOverlay interface {
 	ShowClick(x, y int, label string)
 }
+
+// CountdownOverlay is optionally implemented by a ClickOverlay to show the
+// start-delay countdown ("3 秒後開始") on top of everything. ShowCountdown(0)
+// hides it. It must not intercept input and must return quickly.
+type CountdownOverlay interface {
+	ShowCountdown(seconds int)
+}

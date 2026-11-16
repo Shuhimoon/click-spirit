@@ -25,7 +25,7 @@ typedef struct {
 	Colormap cmap;
 	int depth;
 	GC gc;
-	XftFont *font;
+	XftFont *font, *big;
 	XftColor white;
 	unsigned long blue, ink, halo;
 	int sw, sh;
@@ -87,6 +87,7 @@ static csOverlay *csOverlayOpen(void) {
 	if (o->font == NULL) {
 		o->font = XftFontOpenName(dpy, o->screen, "sans-serif:pixelsize=15");
 	}
+	o->big = XftFontOpenName(dpy, o->screen, "sans-serif:weight=bold:pixelsize=84");
 	XRenderColor w = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
 	XftColorAllocValue(dpy, o->visual, o->cmap, &w, &o->white);
 	XSync(dpy, False);
@@ -99,6 +100,9 @@ static void csOverlayClose(csOverlay *o) {
 	}
 	if (o->font != NULL) {
 		XftFontClose(o->dpy, o->font);
+	}
+	if (o->big != NULL) {
+		XftFontClose(o->dpy, o->big);
 	}
 	XftColorFree(o->dpy, o->visual, o->cmap, &o->white);
 	XFreeGC(o->dpy, o->gc);
@@ -201,6 +205,71 @@ static void csOverlayFrame(csOverlay *o, int x, int y, int ring, const char *lab
 	}
 	XFlush(d);
 }
+static void csFillRound(Display *d, Drawable p, GC gc, int x, int y, int w, int h, int r) {
+	XFillRectangle(d, p, gc, x + r, y, w - 2 * r, h);
+	XFillRectangle(d, p, gc, x, y + r, w, h - 2 * r);
+	XFillArc(d, p, gc, x, y, 2 * r, 2 * r, 90 * 64, 90 * 64);
+	XFillArc(d, p, gc, x + w - 2 * r, y, 2 * r, 2 * r, 0, 90 * 64);
+	XFillArc(d, p, gc, x, y + h - 2 * r, 2 * r, 2 * r, 180 * 64, 90 * 64);
+	XFillArc(d, p, gc, x + w - 2 * r, y + h - 2 * r, 2 * r, 2 * r, 270 * 64, 90 * 64);
+}
+
+static int csTextW(csOverlay *o, XftFont *f, const char *s) {
+	XGlyphInfo g;
+	if (f == NULL) return 0;
+	XftTextExtentsUtf8(o->dpy, f, (const FcChar8 *)s, (int)strlen(s), &g);
+	return g.xOff;
+}
+
+// csOverlayCountdown shows the start-delay card near the top of the screen: a big
+// number and a caption. Same window, same empty input shape (click-through).
+static void csOverlayCountdown(csOverlay *o, const char *num, const char *sub) {
+	Display *d = o->dpy;
+	XftFont *bf = o->big != NULL ? o->big : o->font;
+	int subW = csTextW(o, o->font, sub);
+	int w = subW + 48;
+	if (w < 220) w = 220;
+	int h = 176, r = 24;
+	// Upper part of the screen, so it does not cover the app's own countdown.
+	int wx = (o->sw - w) / 2, wy = o->sh / 6;
+
+	Pixmap mask = XCreatePixmap(d, o->win, w, h, 1);
+	GC mgc = XCreateGC(d, mask, 0, NULL);
+	XSetForeground(d, mgc, 0);
+	XFillRectangle(d, mask, mgc, 0, 0, w, h);
+	XSetForeground(d, mgc, 1);
+	csFillRound(d, mask, mgc, 0, 0, w, h, r);
+
+	Pixmap pix = XCreatePixmap(d, o->win, w, h, o->depth);
+	XSetForeground(d, o->gc, o->blue);
+	XFillRectangle(d, pix, o->gc, 0, 0, w, h);
+	XSetForeground(d, o->gc, o->ink);
+	csFillRound(d, pix, o->gc, 3, 3, w - 6, h - 6, r - 3);
+	XftDraw *xd = XftDrawCreate(d, pix, o->visual, o->cmap);
+	if (bf != NULL) {
+		int nw = csTextW(o, bf, num);
+		XftDrawStringUtf8(xd, &o->white, bf, (w - nw) / 2, 22 + bf->ascent, (const FcChar8 *)num, (int)strlen(num));
+	}
+	if (o->font != NULL) {
+		XftDrawStringUtf8(xd, &o->white, o->font, (w - subW) / 2, h - 26, (const FcChar8 *)sub, (int)strlen(sub));
+	}
+	XftDrawDestroy(xd);
+
+	XMoveResizeWindow(d, o->win, wx, wy, w, h);
+	XShapeCombineMask(d, o->win, ShapeBounding, 0, 0, mask, ShapeSet);
+	XShapeCombineRectangles(d, o->win, ShapeInput, 0, 0, NULL, 0, ShapeSet, Unsorted);
+	XMapRaised(d, o->win);
+	XCopyArea(d, pix, o->win, o->gc, 0, 0, w, h, 0, 0);
+	XFreeGC(d, mgc);
+	XFreePixmap(d, mask);
+	XFreePixmap(d, pix);
+	while (XPending(d) > 0) {
+		XEvent e;
+		XNextEvent(d, &e);
+	}
+	XFlush(d);
+}
+
 // csOverlayInputRects returns how many rectangles make up the input shape
 // (0 means fully click-through) and whether the window is mapped.
 static int csOverlayInputRects(csOverlay *o, int *mapped) {
@@ -235,9 +304,19 @@ const (
 	rippleRMax     = 34
 )
 
+// countdownHold keeps a countdown card up a little past one second so the
+// next tick replaces it without flicker; a missed hide still clears it.
+const countdownHold = 1150 * time.Millisecond
+
+// countdownCaption is the small line under the big countdown number.
+const countdownCaption = "秒後開始 · 按「停止」或緊急熱鍵取消"
+
 type clickReq struct {
 	x, y  int
 	label string
+	// countdown > 0 draws the countdown card; 0 hides a visible card;
+	// -1 (clicks) draws a ripple.
+	countdown int
 }
 
 // x11Overlay runs one goroutine that owns its own X connection. ShowClick
@@ -259,7 +338,18 @@ func newX11ClickOverlay() (core.ClickOverlay, error) {
 }
 
 func (o *x11Overlay) ShowClick(x, y int, label string) {
-	r := clickReq{x, y, label}
+	o.send(clickReq{x: x, y: y, label: label, countdown: -1})
+}
+
+// ShowCountdown draws the start-delay card ("3"), or hides it when n <= 0.
+func (o *x11Overlay) ShowCountdown(n int) {
+	if n < 0 {
+		n = 0
+	}
+	o.send(clickReq{countdown: n})
+}
+
+func (o *x11Overlay) send(r clickReq) {
 	for {
 		select {
 		case o.reqs <- r:
@@ -302,6 +392,7 @@ func (o *x11Overlay) loop(ready chan<- error) {
 	}()
 	frame := 0
 	var hideAt time.Time
+	counting := false
 	tick := time.NewTicker(rippleFrameDur)
 	defer tick.Stop()
 	for {
@@ -313,6 +404,24 @@ func (o *x11Overlay) loop(ready chan<- error) {
 			n := C.csOverlayInputRects(ov, &mapped)
 			reply <- [2]int{int(n), int(mapped)}
 		case r := <-o.reqs:
+			if r.countdown == 0 {
+				if counting {
+					C.csOverlayHide(ov)
+					counting = false
+				}
+				continue
+			}
+			if r.countdown > 0 {
+				num := C.CString(fmt.Sprint(r.countdown))
+				sub := C.CString(countdownCaption)
+				C.csOverlayCountdown(ov, num, sub)
+				C.free(unsafe.Pointer(num))
+				C.free(unsafe.Pointer(sub))
+				cur, counting = nil, true
+				hideAt = time.Now().Add(countdownHold)
+				continue
+			}
+			counting = false
 			cur = &r
 			if label != nil {
 				C.free(unsafe.Pointer(label))
@@ -322,6 +431,10 @@ func (o *x11Overlay) loop(ready chan<- error) {
 			o.draw(ov, cur, label, frame, true)
 			hideAt = time.Now().Add(rippleFrames*rippleFrameDur + rippleHold)
 		case now := <-tick.C:
+			if counting && !now.Before(hideAt) {
+				C.csOverlayHide(ov)
+				counting = false
+			}
 			if cur == nil {
 				continue
 			}

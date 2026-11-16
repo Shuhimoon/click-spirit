@@ -90,7 +90,7 @@ void main() {
     expect(first.containsKey('target'), isFalse);
     expect(first.containsKey('repeat'), isFalse);
     expect(jsonEncode(saved), jsonEncode(original));
-    expect(jsonEncode(Script.sample().toJson()), jsonEncode(original));
+    expect(jsonEncode(Script.sample().toJson()), jsonEncode({...original, 'start_delay_s': 3}));
   });
 
   test('circle and image targets round-trip', () {

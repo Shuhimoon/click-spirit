@@ -352,7 +352,8 @@ class _CaptureScreenPageState extends State<CaptureScreenPage> {
                           const SizedBox(height: 2),
                           Text(_hint, style: TextStyle(fontSize: 12, height: 1.35, color: secondary)),
                           if (_error != null)
-                            Text(_error!, style: const TextStyle(fontSize: 12, height: 1.35, color: ClickSpiritColors.systemRed)),
+                            Text(_error!,
+                                style: const TextStyle(fontSize: 12, height: 1.35, color: ClickSpiritColors.systemRed)),
                         ],
                       ),
                     ),

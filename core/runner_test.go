@@ -63,7 +63,7 @@ func TestRunnerRepeatOrder(t *testing.T) {
 			evMu.Unlock()
 		},
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version:           1,
 		Name:              "order",
 		Repeat:            3,
@@ -129,7 +129,7 @@ func TestRunnerStopInfinite(t *testing.T) {
 			return ctx.Err()
 		},
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version:      1,
 		Repeat:       0,
 		StartDelayMs: 60_000,
@@ -156,7 +156,7 @@ func TestRunnerStartTwice(t *testing.T) {
 			return ctx.Err()
 		},
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version:      1,
 		Repeat:       0,
 		StartDelayMs: 60_000,
@@ -183,7 +183,7 @@ func TestRunnerClickerError(t *testing.T) {
 		Clicker: rec,
 		OnEvent: func(ev Event) { kinds = append(kinds, ev.Kind) },
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps:   []Step{{X: 8, Y: 9, Button: ButtonLeft, Clicks: 1, HoldMs: 5}},
@@ -204,7 +204,7 @@ func TestRunnerClickerError(t *testing.T) {
 
 func TestRunnerRejectsInvalidAndNilClicker(t *testing.T) {
 	runner := &Runner{Clicker: &recorder{}}
-	if err := runner.Run(context.Background(), &Script{}); err == nil {
+	if err := runner.Run(context.Background(), &Script{StartDelaySec: StartDelay(0)}); err == nil {
 		t.Fatal("expected validation error")
 	}
 	runner.Clicker = nil

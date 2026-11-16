@@ -58,6 +58,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int? _activeStep;
   int _activeRepetition = 0;
   bool _running = false;
+
+  /// Legacy `start_delay_ms` from an opened file, kept as is on save.
+  int _legacyDelayMs = 0;
+
+  /// Seconds left in the start countdown, or null when not counting.
+  int? _countdown;
   bool _recording = false;
   bool _logOpen = true;
   bool _sawEmergency = false;
@@ -143,7 +149,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _repeat.text = '${script.repeat}';
     _defaultInterval.text = '${script.defaultIntervalMs}';
     _loopInterval.text = '${script.loopIntervalMs}';
-    _startDelay.text = '${script.startDelayMs}';
+    _startDelay.text = '${script.effectiveStartDelaySec}';
+    _legacyDelayMs = script.startDelayMs;
     _hotkey.text = script.emergencyHotkey.isEmpty ? 'F12' : script.emergencyHotkey;
     _rows
       ..clear()
@@ -160,7 +167,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       repeat: _readInt(_repeat),
       defaultIntervalMs: _readInt(_defaultInterval),
       loopIntervalMs: _readInt(_loopInterval),
-      startDelayMs: _readInt(_startDelay),
+      startDelayMs: _legacyDelayMs,
+      startDelaySec: _readInt(_startDelay),
       emergencyHotkey: _hotkey.text.trim(),
     );
   }
@@ -176,7 +184,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (_log.length > 200) {
         _log.removeRange(0, _log.length - 200);
       }
+      if (ev.kind != 'countdown') _countdown = null;
       switch (ev.kind) {
+        case 'countdown':
+          _running = true;
+          _countdown = ev.remaining;
+          _status = '${ev.remaining} 秒後開始（按「停止」或緊急熱鍵取消）';
         case 'started':
           _running = true;
           _sawEmergency = false;
@@ -406,6 +419,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await widget.engine.stop();
     if (!mounted) return;
     setState(() {
+      _countdown = null;
       _running = false;
       _sawEmergency = false;
       _activeStep = null;
@@ -564,7 +578,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             final top = MediaQuery.paddingOf(context).top + 12;
             return Padding(
               padding: EdgeInsets.fromLTRB(pad, top, pad, 16),
-              child: wide ? _wideLayout() : _narrowLayout(),
+              child: Stack(
+                children: [
+                  Positioned.fill(child: wide ? _wideLayout() : _narrowLayout()),
+                  if (_countdown != null) Positioned.fill(child: _countdownCard(_countdown!)),
+                ],
+              ),
             );
           },
         ),
@@ -625,6 +644,51 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ],
         );
       },
+    );
+  }
+
+  /// Big glass countdown shown in the middle of the window during the start
+  /// delay. It ignores pointer events except its own 停止 button.
+  Widget _countdownCard(int seconds) {
+    final secondary = ClickSpiritColors.secondary(context);
+    return Center(
+      child: GlassPanel(
+        key: const Key('countdown-card'),
+        radius: 28,
+        padding: const EdgeInsets.fromLTRB(36, 22, 36, 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$seconds',
+              key: const Key('countdown-number'),
+              style: TextStyle(
+                fontSize: 88,
+                fontWeight: FontWeight.w700,
+                height: 1.0,
+                letterSpacing: -2,
+                color: ClickSpiritColors.systemBlue,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '秒後開始此腳本',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: ClickSpiritColors.label(context)),
+            ),
+            const SizedBox(height: 4),
+            Text('按「停止」或緊急熱鍵可取消', style: TextStyle(fontSize: 13, color: secondary)),
+            const SizedBox(height: 14),
+            GlassButton(
+              key: const Key('countdown-stop'),
+              onPressed: _stop,
+              icon: Icons.stop_rounded,
+              label: '停止',
+              variant: GlassButtonVariant.tinted,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -722,8 +786,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               keyboardType: TextInputType.number,
             )),
             box(GlassTextField(
+              fieldKey: const Key('start-delay'),
               controller: _startDelay,
-              label: '開始延遲（毫秒）',
+              label: '幾秒後開始此腳本（0 = 立即）',
               keyboardType: TextInputType.number,
             )),
             box(GlassTextField(controller: _hotkey, label: '緊急停止熱鍵')),
@@ -736,9 +801,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _showClicksTile() {
     final secondary = ClickSpiritColors.secondary(context);
-    final detail = _hasOverlay
-        ? '執行時在每次點擊處顯示漣漪與步驟編號。浮層在所有視窗上方，不會擋住滑鼠或觸控。'
-        : '此平台目前沒有系統浮層，點擊位置只顯示在本視窗的預覽中。';
+    final detail = _hasOverlay ? '執行時在每次點擊處顯示漣漪與步驟編號。浮層在所有視窗上方，不會擋住滑鼠或觸控。' : '此平台目前沒有系統浮層，點擊位置只顯示在本視窗的預覽中。';
     return Row(
       children: [
         Expanded(
@@ -955,9 +1018,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _logPane() {
     final secondary = ClickSpiritColors.secondary(context);
-    final hairline = ClickSpiritColors.isDark(context)
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
+    final hairline =
+        ClickSpiritColors.isDark(context) ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06);
     return GlassPanel(
       padding: EdgeInsets.zero,
       child: Column(

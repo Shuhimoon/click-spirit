@@ -30,13 +30,25 @@ class MainActivity : FlutterActivity() {
         Mobile.setListener(object : EventListener {
             override fun onEvent(kind: String?, loop: Long, step: Long, message: String?) {
                 // Clicks arrive with their position through onClick below.
-                if (kind == "click") return
+                if (kind == "click" || kind == "countdown") return
                 emit(
                     mapOf(
                         "kind" to (kind ?: ""),
                         "loop" to loop,
                         "step" to step,
                         "message" to (message ?: ""),
+                    ),
+                )
+            }
+
+            override fun onCountdown(remaining: Long) {
+                emit(
+                    mapOf(
+                        "kind" to "countdown",
+                        "loop" to 0L,
+                        "step" to -1L,
+                        "remaining" to remaining,
+                        "message" to "$remaining 秒後開始",
                     ),
                 )
             }
@@ -124,6 +136,8 @@ class MainActivity : FlutterActivity() {
                 }
                 // The overlay is drawn by the accessibility service, which taps need anyway.
                 "hasClickOverlay" -> result.success(true)
+                "hasScreenPicker" -> result.success(true)
+                "pickOnScreen" -> pickOnScreen(call.argument<String>("mode") ?: "point", result)
                 else -> result.notImplemented()
             }
         }
@@ -140,6 +154,34 @@ class MainActivity : FlutterActivity() {
                 eventSink = null
             }
         })
+    }
+
+    /**
+     * Moves the app to the back so the real screen shows, lets the
+     * accessibility service run its full-screen pick overlay, then brings
+     * the app back and replies {ok, canceled, x, y, r, error}.
+     */
+    private fun pickOnScreen(mode: String, result: MethodChannel.Result) {
+        val service = ClickAccessibilityService.instance
+        if (service == null) {
+            result.success(mapOf("ok" to false, "error" to "請先在設定中啟用點擊精靈的無障礙服務"))
+            return
+        }
+        moveTaskToBack(true)
+        mainHandler.postDelayed({
+            service.startPick(mode) { reply ->
+                val back = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+                try {
+                    // Launch from the system-bound accessibility service: it is exempt
+                    // from background-activity-start limits.
+                    if (back != null) service.startActivity(back)
+                } catch (ignored: Throwable) {
+                }
+                result.success(reply)
+            }
+        }, 350L)
     }
 
     private fun emit(event: Map<String, Any?>) {

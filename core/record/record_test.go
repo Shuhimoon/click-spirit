@@ -52,6 +52,7 @@ func TestToScriptMergeAndPlayback(t *testing.T) {
 	}
 	got := rec.snapshot()
 	wantLog := []string{
+		"sleep 1000", "sleep 1000", "sleep 1000", // default 3 s start countdown
 		"move 10 20", "click left 2 60", "sleep 770",
 		"move 400 500", "click right 1 0", "sleep 500",
 		"move 1 1", "click middle 1 80",

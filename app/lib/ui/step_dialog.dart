@@ -185,12 +185,42 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
     }
   }
 
+  /// Native picker: the app hides, the user clicks (or drags a circle) on
+  /// the real screen, and true screen coordinates come back. Returns false
+  /// when there is no native picker so the caller can fall back.
+  Future<bool> _pickNative(CapturePickMode mode) async {
+    final engine = widget.engine;
+    if (engine == null || mode == CapturePickMode.rect) return false;
+    if (!await engine.hasScreenPicker()) return false;
+    final outcome = await engine.pickOnScreen(mode == CapturePickMode.point ? 'point' : 'circle');
+    if (!mounted) return true;
+    setState(() {
+      _busy = false;
+      if (outcome.canceled) return;
+      if (!outcome.ok) {
+        _error = outcome.error;
+        return;
+      }
+      if (mode == CapturePickMode.point) {
+        _x.text = '${outcome.x}';
+        _y.text = '${outcome.y}';
+      } else {
+        _cx.text = '${outcome.x}';
+        _cy.text = '${outcome.y}';
+        _r.text = '${outcome.r}';
+      }
+    });
+    return true;
+  }
+
   Future<void> _pickOnScreen(CapturePickMode mode) async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
     });
+    if (await _pickNative(mode)) return;
+    if (!mounted) return;
     final bytes = await _captureBytes();
     if (!mounted) return;
     setState(() => _busy = false);
@@ -463,7 +493,8 @@ class _StepEditorDialogState extends State<StepEditorDialog> {
                       if (_error != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
-                          child: Text(_error!, style: const TextStyle(color: ClickSpiritColors.systemRed, fontSize: 13)),
+                          child:
+                              Text(_error!, style: const TextStyle(color: ClickSpiritColors.systemRed, fontSize: 13)),
                         ),
                     ],
                   ),

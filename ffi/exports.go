@@ -37,6 +37,9 @@ func shared() *engine.Engine {
 			if ov, ovErr := platform.NewClickOverlay(); ovErr == nil {
 				sharedEng.SetOverlay(ov)
 			}
+			if p, pErr := platform.NewScreenPicker(); pErr == nil {
+				sharedEng.SetPicker(p)
+			}
 		}
 	})
 	return sharedEng
@@ -233,3 +236,25 @@ func CS_FreeString(p *C.char) {
 }
 
 func main() {}
+
+// CS_StartPick opens the native on-screen picker ("point" or "circle") and
+// returns at once: "" when started, otherwise an error message. The result
+// arrives as one polled event: pick (x, y, r), pick_canceled, or pick_error.
+//
+//export CS_StartPick
+func CS_StartPick(mode *C.char) *C.char {
+	if err := shared().StartPick(core.PickMode(goString(mode))); err != nil {
+		return cString(err.Error())
+	}
+	return cString("")
+}
+
+// CS_HasScreenPicker returns 1 when the native on-screen picker exists.
+//
+//export CS_HasScreenPicker
+func CS_HasScreenPicker() C.int {
+	if shared().HasPicker() {
+		return 1
+	}
+	return 0
+}

@@ -51,7 +51,7 @@ func clickPayloads(t *testing.T, e *Engine) []eventPayload {
 }
 
 func overlayScript(t *testing.T) string {
-	return scriptJSON(t, &core.Script{
+	return scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []core.Step{

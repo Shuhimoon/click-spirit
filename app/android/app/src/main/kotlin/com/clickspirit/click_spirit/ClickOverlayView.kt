@@ -60,12 +60,61 @@ class ClickOverlayView(context: Context, private val onIdle: () -> Unit) : View(
         postInvalidateOnAnimation()
     }
 
+    private var countdown = 0
+    private var countdownUntil = 0L
+    private val card = RectF()
+    private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 28, 28, 30) }
+    private val cardEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+        color = BLUE
+    }
+    private val bigText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 64f * density
+        isFakeBoldText = true
+        textAlign = Paint.Align.CENTER
+    }
+    private val subText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 14f * density
+        textAlign = Paint.Align.CENTER
+    }
+
+    /**
+     * Start-delay card ("3 秒後開始"). seconds <= 0 hides it. Each tick keeps
+     * the card a little over one second so a missed hide still clears it.
+     * Main thread only.
+     */
+    fun setCountdown(seconds: Int) {
+        countdown = seconds
+        countdownUntil = if (seconds > 0) SystemClock.uptimeMillis() + COUNTDOWN_HOLD_MS else 0L
+        postInvalidateOnAnimation()
+    }
+
+    private fun drawCountdown(canvas: Canvas) {
+        val w = 240f * density
+        val h = 150f * density
+        val left = (width - w) / 2
+        val top = height / 6f
+        card.set(left, top, left + w, top + h)
+        canvas.drawRoundRect(card, 24f * density, 24f * density, cardPaint)
+        canvas.drawRoundRect(card, 24f * density, 24f * density, cardEdge)
+        canvas.drawText("$countdown", width / 2f, top + 80f * density, bigText)
+        canvas.drawText("秒後開始 · 按停止取消", width / 2f, top + 122f * density, subText)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val now = SystemClock.uptimeMillis()
         ripples.removeAll { now - it.start > LIFE_MS }
+        val counting = countdown > 0 && now < countdownUntil
+        if (counting) {
+            drawCountdown(canvas)
+            postInvalidateDelayed(100)
+        }
         if (ripples.isEmpty()) {
-            onIdle()
+            if (!counting) onIdle()
             return
         }
         getLocationOnScreen(loc)
@@ -114,5 +163,6 @@ class ClickOverlayView(context: Context, private val onIdle: () -> Unit) : View(
         private const val RIPPLE_MS = 380f
         private const val LIFE_MS = 1100f
         private const val MAX_RIPPLES = 6
+        private const val COUNTDOWN_HOLD_MS = 1150L
     }
 }

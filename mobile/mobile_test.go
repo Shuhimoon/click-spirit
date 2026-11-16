@@ -38,10 +38,11 @@ func (f *fakeDisp) Tap(x, y, durationMs, count int) bool {
 }
 
 type fakeListener struct {
-	mu     sync.Mutex
-	kinds  []string
-	msgs   []string
-	clicks [][5]int
+	mu        sync.Mutex
+	kinds     []string
+	msgs      []string
+	clicks    [][5]int
+	countdown []int
 }
 
 func (f *fakeListener) OnClick(x, y, step, repetition, repeats int) {
@@ -51,15 +52,28 @@ func (f *fakeListener) OnClick(x, y, step, repetition, repeats int) {
 }
 
 type fakeOverlay struct {
-	mu     sync.Mutex
-	labels []string
-	pts    [][2]int
+	mu        sync.Mutex
+	labels    []string
+	pts       [][2]int
+	countdown []int
 }
 
 func (f *fakeOverlay) ShowClick(x, y int, label string) {
 	f.mu.Lock()
 	f.pts = append(f.pts, [2]int{x, y})
 	f.labels = append(f.labels, label)
+	f.mu.Unlock()
+}
+
+func (f *fakeListener) OnCountdown(remaining int) {
+	f.mu.Lock()
+	f.countdown = append(f.countdown, remaining)
+	f.mu.Unlock()
+}
+
+func (f *fakeOverlay) ShowCountdown(seconds int) {
+	f.mu.Lock()
+	f.countdown = append(f.countdown, seconds)
 	f.mu.Unlock()
 }
 
@@ -112,7 +126,7 @@ func TestStartScriptTapsAndListener(t *testing.T) {
 	l := &fakeListener{}
 	SetDispatcher(f)
 	SetListener(l)
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []core.Step{
@@ -151,7 +165,7 @@ func TestStartScriptTapsAndListener(t *testing.T) {
 
 func TestStartRequiresDispatcherAndRejectsDoubleStart(t *testing.T) {
 	reset(t)
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version:      1,
 		Repeat:       0,
 		StartDelayMs: 60_000,
@@ -194,7 +208,7 @@ func TestDispatchFailure(t *testing.T) {
 	reset(t)
 	f := &fakeDisp{ok: false}
 	SetDispatcher(f)
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps:   []core.Step{{X: 1, Y: 2, Button: core.ButtonMiddle, Clicks: 1}},
@@ -252,7 +266,7 @@ func TestStepRepeatAndCircle(t *testing.T) {
 	e.Sleep = func(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	}
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  2,
 		Steps: []core.Step{
@@ -335,7 +349,7 @@ func TestEmergencyStop(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  0,
 		Steps:   []core.Step{{X: 1, Y: 1, Button: core.ButtonLeft, IntervalMs: 60_000}},
@@ -449,7 +463,7 @@ func TestClickEventsReachListenerAndOverlay(t *testing.T) {
 	SetDispatcher(f)
 	SetListener(l)
 	SetOverlay(ov)
-	raw := mustJSON(t, &core.Script{
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []core.Step{
@@ -511,5 +525,39 @@ func TestClickEventsReachListenerAndOverlay(t *testing.T) {
 	ov.mu.Unlock()
 	if n != 4 {
 		t.Fatalf("overlay drew while disabled: %d draws", n)
+	}
+}
+
+func TestCountdownReachesListenerAndOverlay(t *testing.T) {
+	reset(t)
+	f := &fakeDisp{ok: true}
+	l := &fakeListener{}
+	ov := &fakeOverlay{}
+	SetDispatcher(f)
+	SetListener(l)
+	SetOverlay(ov)
+	defer SetOverlay(nil)
+	raw := mustJSON(t, &core.Script{StartDelaySec: core.StartDelay(1),
+		Version: 1, Repeat: 1,
+		Steps: []core.Step{{X: 10, Y: 20, Button: core.ButtonLeft}},
+	})
+	if err := StartScript(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := currentEngine(t).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ov.mu.Lock()
+	defer ov.mu.Unlock()
+	if len(l.countdown) != 1 || l.countdown[0] != 1 {
+		t.Fatalf("listener countdown %v", l.countdown)
+	}
+	if len(ov.countdown) != 2 || ov.countdown[0] != 1 || ov.countdown[1] != 0 {
+		t.Fatalf("overlay countdown %v want [1 0]", ov.countdown)
+	}
+	if len(l.clicks) != 1 {
+		t.Fatalf("clicks %v", l.clicks)
 	}
 }

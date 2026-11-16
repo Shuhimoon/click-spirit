@@ -77,6 +77,72 @@ class ClickAccessibilityService : AccessibilityService(), GestureDispatcher, Cli
         }
     }
 
+    override fun showCountdown(seconds: Long) {
+        mainHandler.post {
+            if (seconds <= 0) {
+                overlay?.setCountdown(0)
+                return@post
+            }
+            val view = attachOverlay() ?: return@post
+            mainHandler.removeCallbacks(removeOverlay)
+            view.setCountdown(seconds.toInt())
+        }
+    }
+
+    private var picker: ScreenPickOverlay? = null
+
+    /**
+     * 螢幕點選座標 / 從螢幕擷取設定圓形 on Android: adds a full-screen,
+     * touchable TYPE_ACCESSIBILITY_OVERLAY that reports the tap (or the
+     * dragged circle) in raw screen pixels, the same space dispatchGesture
+     * uses, then removes itself. [done] runs on the main thread once.
+     */
+    fun startPick(mode: String, done: (Map<String, Any?>) -> Unit) {
+        mainHandler.post {
+            picker?.let { finishPick(it) }
+            val wm = getSystemService(WINDOW_SERVICE) as? WindowManager
+            if (wm == null) {
+                done(mapOf("ok" to false, "error" to "無法取得 WindowManager"))
+                return@post
+            }
+            lateinit var view: ScreenPickOverlay
+            view = ScreenPickOverlay(this, mode == "circle") { result ->
+                finishPick(view)
+                done(result)
+            }
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                title = "click-spirit-picker"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            try {
+                wm.addView(view, params)
+                picker = view
+                view.requestFocus()
+            } catch (t: Throwable) {
+                Log.e(TAG, "cannot add pick overlay", t)
+                done(mapOf("ok" to false, "error" to "無法顯示選取浮層：${t.message}"))
+            }
+        }
+    }
+
+    private fun finishPick(view: ScreenPickOverlay) {
+        if (picker === view) picker = null
+        try {
+            (getSystemService(WINDOW_SERVICE) as? WindowManager)?.removeView(view)
+        } catch (ignored: Throwable) {
+        }
+    }
+
     /** Adds the click-through overlay window on first use. Main thread only. */
     private fun attachOverlay(): ClickOverlayView? {
         overlay?.let { return it }

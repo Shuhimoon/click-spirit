@@ -29,7 +29,7 @@ func TestRunnerStepRepeatOrder(t *testing.T) {
 			evMu.Unlock()
 		},
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version:           1,
 		Repeat:            2,
 		DefaultIntervalMs: 999,
@@ -88,7 +88,7 @@ func TestRunnerStepRepeatOrder(t *testing.T) {
 func TestRunnerPerStepIntervalUsesDefault(t *testing.T) {
 	rec := &recorder{}
 	runner := &Runner{Clicker: rec, Sleep: rec.sleep}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version:           1,
 		Repeat:            1,
 		DefaultIntervalMs: 40,
@@ -127,7 +127,7 @@ func TestRunnerStopMidSequence(t *testing.T) {
 			return ctx.Err()
 		},
 	}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []Step{
@@ -171,7 +171,7 @@ func TestRunnerCircleIsDeterministic(t *testing.T) {
 	wx, wy := PointInDisc(50, 60, 15, probe.Float64(), probe.Float64())
 	rec := &recorder{}
 	runner := &Runner{Clicker: rec, Sleep: rec.sleep, Rand: rng.Float64}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []Step{{
@@ -211,7 +211,10 @@ func TestOldScriptRunsIdentically(t *testing.T) {
 	if err := runner.Run(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
+	// No start_delay_s in the file: the default 3 s countdown runs first,
+	// then the legacy start_delay_ms pause.
 	want := []string{
+		"sleep 1000", "sleep 1000", "sleep 1000",
 		"sleep 200",
 		"move 100 200", "click left 1 0", "sleep 50",
 		"move 300 400", "click right 2 30", "sleep 100",
@@ -262,7 +265,7 @@ func TestRunnerImageClickSkipStopWait(t *testing.T) {
 		}
 		rec := &recorder{}
 		runner := &Runner{Clicker: rec, Sleep: rec.sleep, Capturer: stillCap{img: screen}}
-		script := &Script{
+		script := &Script{StartDelaySec: StartDelay(0),
 			Version: 1, Repeat: 1,
 			Steps: []Step{{
 				Button: ButtonLeft, Clicks: 1,
@@ -395,7 +398,7 @@ func TestRunnerImageClickSkipStopWait(t *testing.T) {
 
 func TestRunnerBadTemplate(t *testing.T) {
 	runner := &Runner{Clicker: &recorder{}}
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version: 1, Repeat: 1,
 		Steps: []Step{{
 			Button: ButtonLeft, Clicks: 1,
@@ -450,7 +453,7 @@ func (s *seqCap) Capture() (image.Image, error) {
 }
 
 func imageScript(b64, onNotFound string, timeout, poll int) *Script {
-	return &Script{
+	return &Script{StartDelaySec: StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps: []Step{{

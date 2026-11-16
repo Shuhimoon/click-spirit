@@ -38,8 +38,10 @@ class FakeClickEngine implements ClickEngine {
     return startResult;
   }
 
+  int stopCalls = 0;
+
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async => stopCalls++;
 
   @override
   Future<bool> isRunning() async => false;
@@ -89,6 +91,19 @@ class FakeClickEngine implements ClickEngine {
 
   @override
   Future<bool> hasClickOverlay() async => overlay;
+
+  bool picker = false;
+  PickOutcome pickResult = const PickOutcome.canceled();
+  final List<String> pickModes = [];
+
+  @override
+  Future<bool> hasScreenPicker() async => picker;
+
+  @override
+  Future<PickOutcome> pickOnScreen(String mode) async {
+    pickModes.add(mode);
+    return pickResult;
+  }
 
   @override
   void dispose() {

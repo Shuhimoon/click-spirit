@@ -22,6 +22,9 @@ class EngineEvent {
     this.y = 0,
     this.button = '',
     this.clicks = 0,
+    this.r = 0,
+    this.remaining = 0,
+    this.mode = '',
   });
 
   final String kind;
@@ -41,6 +44,15 @@ class EngineEvent {
   final String button;
   final int clicks;
 
+  /// Radius for a circle `pick` event.
+  final int r;
+
+  /// Seconds left for a `countdown` event (N..1).
+  final int remaining;
+
+  /// `point` or `circle` for pick events.
+  final String mode;
+
   factory EngineEvent.fromJson(Map<String, dynamic> json) {
     return EngineEvent(
       kind: _asString(json['kind']),
@@ -53,9 +65,56 @@ class EngineEvent {
       y: _asInt(json['y']),
       button: _asString(json['button']),
       clicks: _asInt(json['clicks']),
+      r: _asInt(json['r']),
+      remaining: _asInt(json['remaining']),
+      mode: _asString(json['mode']),
     );
   }
 }
+
+/// Result of [ClickEngine.pickOnScreen]: a true screen coordinate (and a
+/// radius in circle mode), a cancel, or an error message.
+class PickOutcome {
+  const PickOutcome({this.x = 0, this.y = 0, this.r = 0, this.canceled = false, this.error = ''});
+
+  const PickOutcome.canceled() : this(canceled: true);
+
+  const PickOutcome.failed(String message) : this(error: message);
+
+  final int x;
+  final int y;
+  final int r;
+  final bool canceled;
+  final String error;
+
+  bool get ok => !canceled && error.isEmpty;
+
+  /// From a native `pick`, `pick_canceled`, or `pick_error` event.
+  factory PickOutcome.fromEvent(EngineEvent ev) {
+    switch (ev.kind) {
+      case 'pick':
+        return PickOutcome(x: ev.x, y: ev.y, r: ev.r);
+      case 'pick_canceled':
+        return const PickOutcome.canceled();
+      default:
+        return PickOutcome.failed(ev.message.isEmpty ? '選取失敗' : ev.message);
+    }
+  }
+
+  /// From the Android method-channel reply `{ok, canceled, x, y, r, error}`.
+  factory PickOutcome.fromMap(Map<Object?, Object?>? map) {
+    if (map == null) return const PickOutcome.failed('沒有回應');
+    if (map['canceled'] == true) return const PickOutcome.canceled();
+    final err = map['error'];
+    if (map['ok'] != true) {
+      return PickOutcome.failed(err == null || err.toString().isEmpty ? '選取失敗' : err.toString());
+    }
+    return PickOutcome(x: _asInt(map['x']), y: _asInt(map['y']), r: _asInt(map['r']));
+  }
+}
+
+/// True for the event kinds that end a native pick.
+bool isPickEvent(String kind) => kind == 'pick' || kind == 'pick_canceled' || kind == 'pick_error';
 
 /// JSON from [ClickEngine.matchImage].
 class MatchHit {
@@ -200,6 +259,14 @@ abstract class ClickEngine {
   /// and Android). Elsewhere the app shows clicks in its own window only.
   Future<bool> hasClickOverlay();
 
+  /// Whether a native on-screen picker exists (Linux X11 and Android). When
+  /// false the step editor falls back to its in-app capture screen.
+  Future<bool> hasScreenPicker();
+
+  /// Hides the app, lets the user click a point (`point`) or drag a circle
+  /// (`circle`) on the real screen, and returns true screen coordinates.
+  Future<PickOutcome> pickOnScreen(String mode);
+
   void dispose();
 }
 
@@ -268,6 +335,12 @@ class UnavailableClickEngine implements ClickEngine {
 
   @override
   Future<bool> hasClickOverlay() async => false;
+
+  @override
+  Future<bool> hasScreenPicker() async => false;
+
+  @override
+  Future<PickOutcome> pickOnScreen(String mode) async => PickOutcome.failed('原生函式庫無法載入：$error');
 
   @override
   void dispose() {

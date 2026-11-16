@@ -30,3 +30,8 @@ func ClickLabel(ev core.Event) string {
 	}
 	return fmt.Sprintf("步驟 %d · 第 %d/%d 次", ev.StepIndex+1, ev.Repetition+1, n)
 }
+
+// CountdownLabel is the start-delay caption, e.g. "3 秒後開始".
+func CountdownLabel(sec int) string {
+	return fmt.Sprintf("%d 秒後開始", sec)
+}

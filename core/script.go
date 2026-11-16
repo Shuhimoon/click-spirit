@@ -150,7 +150,13 @@ type Script struct {
 	Repeat            int    `json:"repeat"`
 	DefaultIntervalMs int    `json:"default_interval_ms"`
 	LoopIntervalMs    int    `json:"loop_interval_ms"`
-	StartDelayMs      int    `json:"start_delay_ms"`
+	// StartDelayMs is the legacy fine-grained start pause. It still runs,
+	// after the countdown, so older scripts behave as before.
+	StartDelayMs int `json:"start_delay_ms"`
+	// StartDelaySec is 「幾秒後開始此腳本」: a visible countdown before the
+	// first click. Nil (field missing in older files) means
+	// DefaultStartDelaySec; 0 starts immediately.
+	StartDelaySec *int `json:"start_delay_s,omitempty"`
 	// EmergencyHotkey is an optional chord such as "F12" or "Ctrl+Shift+Esc".
 	// The engine arms it when a hotkey backend is configured. Empty leaves the
 	// current hotkey alone.
@@ -167,7 +173,8 @@ func (s *Script) Validate() error {
 	if len(s.Steps) == 0 {
 		return errors.New("steps must be non-empty")
 	}
-	if s.Version < 0 || s.Repeat < 0 || s.DefaultIntervalMs < 0 || s.LoopIntervalMs < 0 || s.StartDelayMs < 0 {
+	if s.Version < 0 || s.Repeat < 0 || s.DefaultIntervalMs < 0 || s.LoopIntervalMs < 0 || s.StartDelayMs < 0 ||
+		(s.StartDelaySec != nil && (*s.StartDelaySec < 0 || *s.StartDelaySec > MaxStartDelaySec)) {
 		return errors.New("negative value")
 	}
 	if s.EmergencyHotkey != "" {
@@ -286,9 +293,34 @@ func NewSample() *Script {
 		DefaultIntervalMs: 100,
 		LoopIntervalMs:    500,
 		StartDelayMs:      200,
+		StartDelaySec:     intPtr(DefaultStartDelaySec),
 		Steps: []Step{
 			{X: 100, Y: 200, Button: ButtonLeft, Clicks: 1, IntervalMs: 50, HoldMs: 0},
 			{X: 300, Y: 400, Button: ButtonRight, Clicks: 2, IntervalMs: 0, HoldMs: 30},
 		},
 	}
 }
+
+// DefaultStartDelaySec is the countdown used when start_delay_s is missing.
+const DefaultStartDelaySec = 3
+
+// MaxStartDelaySec caps the countdown at one hour.
+const MaxStartDelaySec = 3600
+
+// EffectiveStartDelaySec is the countdown length in whole seconds.
+func (s *Script) EffectiveStartDelaySec() int {
+	if s == nil || s.StartDelaySec == nil {
+		return DefaultStartDelaySec
+	}
+	return *s.StartDelaySec
+}
+
+// SetStartDelaySec stores an explicit countdown (0 = start immediately).
+func (s *Script) SetStartDelaySec(n int) {
+	s.StartDelaySec = &n
+}
+
+func intPtr(n int) *int { return &n }
+
+// StartDelay returns a pointer for Script.StartDelaySec literals.
+func StartDelay(sec int) *int { return &sec }

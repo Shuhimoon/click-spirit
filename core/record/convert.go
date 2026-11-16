@@ -61,6 +61,9 @@ func ToScript(events []Event, opt Options) (*core.Script, error) {
 		DefaultIntervalMs: def,
 		LoopIntervalMs:    0,
 		StartDelayMs:      0,
+		// Recordings get the default countdown so there is time to switch
+		// back to the target window before the replay starts.
+		StartDelaySec: core.StartDelay(core.DefaultStartDelaySec),
 	}, nil
 }
 

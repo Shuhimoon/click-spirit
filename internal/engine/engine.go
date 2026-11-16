@@ -36,6 +36,9 @@ type Engine struct {
 
 	overlay    core.ClickOverlay
 	hideClicks bool
+	picker     core.ScreenPicker
+	counting   bool
+	picking    bool
 
 	capturer   core.ScreenCapturer
 	hotkeyMu   sync.Mutex
@@ -224,7 +227,22 @@ func (e *Engine) onRunnerEvent(ev core.Event) {
 	if ev.Kind == core.EventClick && !e.hideClicks {
 		overlay = e.overlay
 	}
+	// The countdown shows even with click marks off: it is the only on-screen
+	// sign that a run is about to start. Any later event hides it.
+	countdown, _ := e.overlay.(core.CountdownOverlay)
+	showCountdown := -1
+	switch {
+	case ev.Kind == core.EventCountdown:
+		showCountdown = ev.Remaining
+		e.counting = true
+	case e.counting:
+		showCountdown = 0
+		e.counting = false
+	}
 	e.mu.Unlock()
+	if countdown != nil && showCountdown >= 0 {
+		countdown.ShowCountdown(showCountdown)
+	}
 	if overlay != nil {
 		overlay.ShowClick(ev.Step.X, ev.Step.Y, ClickLabel(ev))
 	}
@@ -257,6 +275,7 @@ type eventPayload struct {
 	Y          int    `json:"y"`
 	Button     string `json:"button"`
 	Clicks     int    `json:"clicks"`
+	Remaining  int    `json:"remaining"`
 }
 
 func payloadOf(ev core.Event) eventPayload {
@@ -271,6 +290,7 @@ func payloadOf(ev core.Event) eventPayload {
 		Y:          ev.Step.Y,
 		Button:     string(ev.Step.Button),
 		Clicks:     ev.Step.Clicks,
+		Remaining:  ev.Remaining,
 	}
 	if ev.Kind == core.EventStep || ev.Kind == core.EventClick {
 		p.Clicks = ev.Step.EffectiveClicks()
@@ -283,6 +303,8 @@ func Message(ev core.Event) string {
 	switch ev.Kind {
 	case core.EventStarted:
 		return "開始執行"
+	case core.EventCountdown:
+		return CountdownLabel(ev.Remaining)
 	case core.EventStep:
 		return sprintfStep(ev.Step, ev.Repetition)
 	case core.EventLoopDone:

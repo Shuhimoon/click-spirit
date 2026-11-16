@@ -31,6 +31,9 @@ const (
 	// Step.Y hold the clicked screen position (the drawn point for circles,
 	// the match center for images). It is not emitted for skipped image steps.
 	EventClick EventKind = "click"
+	// EventCountdown is emitted once per second before the first click while
+	// the start delay counts down. Remaining is the seconds left (N..1).
+	EventCountdown EventKind = "countdown"
 )
 
 // ErrNoCapturer is returned when an image step runs without a ScreenCapturer.
@@ -51,8 +54,10 @@ type Event struct {
 	// Repeats is the step's effective repeat count (>= 1) for step and click
 	// events, and 0 otherwise.
 	Repeats int
-	Step    Step
-	Err     error
+	// Remaining is the countdown seconds left for countdown events.
+	Remaining int
+	Step      Step
+	Err       error
 }
 
 // Clicker performs pointer actions.
@@ -244,6 +249,18 @@ func (r *Runner) loop(ctx context.Context, s *Script, f flight) error {
 		return err
 	}
 	f.emit(Event{Kind: EventStarted, Loop: 0, StepIndex: -1})
+	// 延遲啟動: one countdown event and one 1 s sleep per second, through the
+	// injectable Sleep, so Stop or the emergency hotkey cancels it with no
+	// click performed.
+	for left := s.EffectiveStartDelaySec(); left > 0; left-- {
+		if err := ctx.Err(); err != nil {
+			return f.halt(ctx, 0)
+		}
+		f.emit(Event{Kind: EventCountdown, Loop: 0, StepIndex: -1, Remaining: left})
+		if err := f.sleep(ctx, time.Second); err != nil {
+			return f.endWait(ctx, err, 0, -1, Step{})
+		}
+	}
 	if err := f.wait(ctx, s.StartDelayMs); err != nil {
 		return f.endWait(ctx, err, 0, -1, Step{})
 	}

@@ -219,8 +219,12 @@ class Script {
     required this.defaultIntervalMs,
     required this.loopIntervalMs,
     required this.startDelayMs,
+    this.startDelaySec,
     this.emergencyHotkey = '',
   });
+
+  /// Countdown used when `start_delay_s` is missing from a script file.
+  static const defaultStartDelaySec = 3;
 
   int version;
   String name;
@@ -229,7 +233,13 @@ class Script {
   int defaultIntervalMs;
   int loopIntervalMs;
   int startDelayMs;
+
+  /// 「幾秒後開始此腳本」. Null (field missing in older files) means
+  /// [defaultStartDelaySec]; 0 starts immediately.
+  int? startDelaySec;
   String emergencyHotkey;
+
+  int get effectiveStartDelaySec => startDelaySec ?? defaultStartDelaySec;
 
   /// Matches [core.NewSample] in the Go module.
   factory Script.sample() {
@@ -240,6 +250,7 @@ class Script {
       defaultIntervalMs: 100,
       loopIntervalMs: 500,
       startDelayMs: 200,
+      startDelaySec: 3,
       steps: [
         Step(x: 100, y: 200, button: 'left', clicks: 1, intervalMs: 50, holdMs: 0),
         Step(x: 300, y: 400, button: 'right', clicks: 2, intervalMs: 0, holdMs: 30),
@@ -257,6 +268,9 @@ class Script {
       'loop_interval_ms': loopIntervalMs,
       'start_delay_ms': startDelayMs,
     };
+    // Written when set (the editor always sets it); an untouched old file
+    // re-saves byte-identical and still means the 3 s default.
+    if (startDelaySec != null) map['start_delay_s'] = startDelaySec;
     if (emergencyHotkey.isNotEmpty) map['emergency_hotkey'] = emergencyHotkey;
     return map;
   }
@@ -279,6 +293,7 @@ class Script {
       defaultIntervalMs: _asInt(json['default_interval_ms']),
       loopIntervalMs: _asInt(json['loop_interval_ms']),
       startDelayMs: _asInt(json['start_delay_ms']),
+      startDelaySec: json.containsKey('start_delay_s') ? _asInt(json['start_delay_s']) : null,
       emergencyHotkey: _asString(json['emergency_hotkey']),
     );
   }

@@ -39,7 +39,7 @@ func TestRunnerEmitsClickEventsInOrderWithPositions(t *testing.T) {
 		},
 	}
 	const cx, cy, radius = 400, 300, 50
-	script := &Script{
+	script := &Script{StartDelaySec: StartDelay(0),
 		Version: 1,
 		Repeat:  2,
 		Steps: []Step{
@@ -101,7 +101,7 @@ func TestRunnerClickEventFollowsStepEvent(t *testing.T) {
 		Sleep:   noSleep,
 		OnEvent: func(ev Event) { kinds = append(kinds, ev.Kind) },
 	}
-	script := &Script{Version: 1, Repeat: 1, Steps: []Step{{X: 1, Y: 2, Button: ButtonLeft}}}
+	script := &Script{StartDelaySec: StartDelay(0), Version: 1, Repeat: 1, Steps: []Step{{X: 1, Y: 2, Button: ButtonLeft}}}
 	if err := r.Run(context.Background(), script); err != nil {
 		t.Fatal(err)
 	}

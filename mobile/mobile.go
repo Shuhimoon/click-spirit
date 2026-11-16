@@ -29,13 +29,20 @@ type GestureDispatcher interface {
 type EventListener interface {
 	OnEvent(kind string, loop int, step int, message string)
 	OnClick(x, y, step, repetition, repeats int)
+	// OnCountdown is called once per second during the start delay with the
+	// seconds left (N..1). OnEvent also receives a "countdown" event.
+	OnCountdown(remaining int)
 }
 
 // ClickOverlay draws the run-time click marker. On Android the accessibility
 // service implements it with a TYPE_ACCESSIBILITY_OVERLAY window that does
 // not take touches. label is e.g. "步驟 2 · 第 3/10 次".
+//
+// ShowCountdown draws the start-delay card ("3 秒後開始") in the screen
+// centre; ShowCountdown(0) hides it. It is shown even with click marks off.
 type ClickOverlay interface {
 	ShowClick(x, y int, label string)
+	ShowCountdown(seconds int)
 }
 
 var (
@@ -44,6 +51,7 @@ var (
 	listener EventListener
 	overlay  ClickOverlay
 	showOff  bool
+	counting bool
 	clicker  *dispatcherClicker
 	eng      *engine.Engine
 )
@@ -180,14 +188,30 @@ func forwardEvent(ev core.Event) {
 	if ev.Kind == core.EventClick && !showOff {
 		o = overlay
 	}
+	cdOverlay := overlay
+	cd := -1
+	switch {
+	case ev.Kind == core.EventCountdown:
+		cd = ev.Remaining
+		counting = true
+	case counting:
+		cd = 0
+		counting = false
+	}
 	mu.Unlock()
+	if cdOverlay != nil && cd >= 0 {
+		cdOverlay.ShowCountdown(cd)
+	}
 	if o != nil {
 		o.ShowClick(ev.Step.X, ev.Step.Y, engine.ClickLabel(ev))
 	}
 	if l != nil {
 		l.OnEvent(string(ev.Kind), ev.Loop, ev.StepIndex, msg)
-		if ev.Kind == core.EventClick {
+		switch ev.Kind {
+		case core.EventClick:
 			l.OnClick(ev.Step.X, ev.Step.Y, ev.StepIndex, ev.Repetition, ev.Repeats)
+		case core.EventCountdown:
+			l.OnCountdown(ev.Remaining)
 		}
 	}
 }

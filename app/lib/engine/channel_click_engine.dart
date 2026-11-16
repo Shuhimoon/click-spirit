@@ -135,5 +135,30 @@ class ChannelClickEngine implements ClickEngine {
   }
 
   @override
+  Future<bool> hasScreenPicker() async {
+    try {
+      return await _method.invokeMethod<bool>('hasScreenPicker') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// The accessibility service adds a full-screen touchable overlay, the app
+  /// moves to the back, and the reply carries screen pixels.
+  @override
+  Future<PickOutcome> pickOnScreen(String mode) async {
+    try {
+      final raw = await _method.invokeMethod<Map<Object?, Object?>>('pickOnScreen', {'mode': mode});
+      return PickOutcome.fromMap(raw);
+    } on PlatformException catch (e) {
+      return PickOutcome.failed(e.message ?? e.code);
+    } on MissingPluginException {
+      return const PickOutcome.failed('此版本不支援螢幕點選');
+    }
+  }
+
+  @override
   void dispose() {}
 }

@@ -64,7 +64,7 @@ func TestEngineRunAndCursor(t *testing.T) {
 	f := &fakeClicker{x: 4, y: 5, hasLoc: true}
 	e := New(f, nil)
 	e.Sleep = instant
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  2,
 		Steps: []core.Step{
@@ -114,7 +114,7 @@ func TestEngineClickerErrorAndBadJSON(t *testing.T) {
 	f := &fakeClicker{err: boom}
 	e := New(f, nil)
 	e.Sleep = instant
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps:   []core.Step{{X: 1, Y: 2, Button: core.ButtonRight, Clicks: 1}},
@@ -142,7 +142,7 @@ func TestEngineStopAndDoubleStart(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version:      1,
 		Repeat:       0,
 		StartDelayMs: 60_000,
@@ -166,7 +166,7 @@ func TestEngineDropsOldest(t *testing.T) {
 	e := New(f, nil)
 	e.maxQueue = 2
 	e.Sleep = instant
-	raw := scriptJSON(t, &core.Script{
+	raw := scriptJSON(t, &core.Script{StartDelaySec: core.StartDelay(0),
 		Version: 1,
 		Repeat:  1,
 		Steps:   []core.Step{{X: 1, Y: 1, Button: core.ButtonLeft, Clicks: 1}},
