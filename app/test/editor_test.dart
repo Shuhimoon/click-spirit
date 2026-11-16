@@ -64,6 +64,12 @@ void main() {
     await tester.ensureVisible(find.byTooltip('複製').first);
     await tester.tap(find.byTooltip('複製').first);
     await tester.pumpAndSettle();
+    // Tiles are 140 px tall now, so the third one may sit below the fold.
+    await tester.scrollUntilVisible(
+      find.text('步驟 3'),
+      120,
+      scrollable: find.descendant(of: find.byType(ReorderableListView), matching: find.byType(Scrollable)).first,
+    );
     expect(find.text('步驟 3'), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const ValueKey('step-summary-1'))).data, contains('100, 200'));
   });

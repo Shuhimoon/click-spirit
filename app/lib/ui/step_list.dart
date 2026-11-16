@@ -79,6 +79,13 @@ String stepDetails(Step step) {
   return '點擊 $clicks  間隔 ${step.intervalMs} ms  重複 ${step.effectiveRepeat}  按住 ${step.holdMs} ms';
 }
 
+/// Height of one step tile before it was doubled (measured: 70 logical px).
+const double kLegacyStepTileHeight = 70;
+
+/// Step tiles are rows in a vertical list, so "twice as long" doubles the
+/// main-axis size: the tile height goes from 70 to 140.
+const double kStepTileHeight = kLegacyStepTileHeight * 2;
+
 class StepList extends StatelessWidget {
   const StepList({
     super.key,
@@ -149,82 +156,89 @@ class StepList extends StatelessWidget {
         return Padding(
           key: ValueKey(row.id),
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: GlassPanel(
-            radius: 16,
-            sigma: 12,
-            shadow: false,
-            tint: tint,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: InkWell(
-              onTap: () => onSelect(index),
-              borderRadius: BorderRadius.circular(12),
-              child: Row(
-                children: [
-                  _badge(index + 1, active),
-                  const SizedBox(width: 10),
-                  Icon(stepKindIcon(step), size: 18, color: ClickSpiritColors.secondary(context)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '步驟 ${index + 1}',
-                          key: ValueKey('step-title-$index'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -0.3,
-                            height: 1.25,
-                            color: ClickSpiritColors.label(context),
+          child: SizedBox(
+            height: kStepTileHeight,
+            child: GlassPanel(
+              key: ValueKey('step-tile-$index'),
+              radius: 20,
+              sigma: 12,
+              shadow: false,
+              tint: tint,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: InkWell(
+                onTap: () => onSelect(index),
+                borderRadius: BorderRadius.circular(14),
+                child: Row(
+                  children: [
+                    _badge(index + 1, active),
+                    const SizedBox(width: 14),
+                    Icon(stepKindIcon(step), size: 26, color: ClickSpiritColors.secondary(context)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '步驟 ${index + 1}',
+                            key: ValueKey('step-title-$index'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.4,
+                              height: 1.25,
+                              color: ClickSpiritColors.label(context),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          stepWhere(step),
-                          key: ValueKey('step-summary-$index'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 1.3,
-                            color: ClickSpiritColors.secondary(context),
+                          const SizedBox(height: 6),
+                          Text(
+                            stepWhere(step),
+                            key: ValueKey('step-summary-$index'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 16,
+                              height: 1.3,
+                              color: ClickSpiritColors.secondary(context),
+                            ),
                           ),
-                        ),
-                        Text(
-                          stepDetails(step),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            height: 1.3,
-                            color: ClickSpiritColors.systemGray,
+                          const SizedBox(height: 4),
+                          Text(
+                            stepDetails(step),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.3,
+                              color: ClickSpiritColors.systemGray,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (active) ...[
-                    const SizedBox(width: 6),
-                    _repetitionBadge(activeRepetition + 1, step.effectiveRepeat),
-                  ],
-                  _action('編輯', Icons.edit_outlined, ClickSpiritColors.secondary(context), () => onEdit(index)),
-                  _action('複製', Icons.content_copy_outlined, ClickSpiritColors.secondary(context), () => onDuplicate(index)),
-                  _action('刪除', Icons.delete_outline, ClickSpiritColors.systemRed, () => onDelete(index)),
-                  ReorderableDragStartListener(
-                    index: index,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.drag_handle_rounded,
-                        key: ValueKey('drag-$index'),
-                        color: ClickSpiritColors.tertiary(context),
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    if (active) ...[
+                      const SizedBox(width: 6),
+                      _repetitionBadge(activeRepetition + 1, step.effectiveRepeat),
+                    ],
+                    _action('編輯', Icons.edit_outlined, ClickSpiritColors.secondary(context), () => onEdit(index)),
+                    _action('複製', Icons.content_copy_outlined, ClickSpiritColors.secondary(context),
+                        () => onDuplicate(index)),
+                    _action('刪除', Icons.delete_outline, ClickSpiritColors.systemRed, () => onDelete(index)),
+                    ReorderableDragStartListener(
+                      index: index,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.drag_handle_rounded,
+                          key: ValueKey('drag-$index'),
+                          color: ClickSpiritColors.tertiary(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -235,8 +249,8 @@ class StepList extends StatelessWidget {
 
   Widget _badge(int number, bool active) {
     return Container(
-      width: 28,
-      height: 28,
+      width: 44,
+      height: 44,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: active ? ClickSpiritColors.systemBlue : ClickSpiritColors.systemBlue.withValues(alpha: 0.12),
@@ -245,7 +259,7 @@ class StepList extends StatelessWidget {
       child: Text(
         '$number',
         style: TextStyle(
-          fontSize: 13,
+          fontSize: 18,
           fontWeight: FontWeight.w600,
           height: 1,
           color: active ? Colors.white : ClickSpiritColors.systemBlue,
