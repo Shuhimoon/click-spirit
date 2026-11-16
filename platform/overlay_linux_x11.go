@@ -3,7 +3,7 @@
 package platform
 
 /*
-#cgo pkg-config: x11 xext xft
+#cgo pkg-config: x11 xext xft fontconfig
 #include <stdlib.h>
 #include <string.h>
 #include <X11/Xlib.h>
@@ -11,6 +11,7 @@ package platform
 #include <X11/Xatom.h>
 #include <X11/extensions/shape.h>
 #include <X11/Xft/Xft.h>
+#include "x11_common.h"
 
 // csOverlay is a borderless, override-redirect (always on top, never managed
 // or focused) window. Its bounding shape is a 1-bit mask of the ripple ring,
@@ -46,10 +47,11 @@ static unsigned long csRGB(csOverlay *o, unsigned short r, unsigned short g, uns
 
 static csOverlay *csOverlayOpen(void) {
 	int ev = 0, er = 0;
-	Display *dpy = XOpenDisplay(NULL);
+	Display *dpy = csXOpen();
 	if (dpy == NULL) {
 		return NULL;
 	}
+	csXftNoFontCache(dpy);
 	if (!XShapeQueryExtension(dpy, &ev, &er)) {
 		XCloseDisplay(dpy);
 		return NULL;
@@ -324,12 +326,13 @@ type clickReq struct {
 type x11Overlay struct {
 	reqs  chan clickReq
 	quit  chan struct{}
+	done  chan struct{} // closed after the window and connection are gone
 	probe chan chan [2]int
 }
 
 func newX11ClickOverlay() (core.ClickOverlay, error) {
 	ready := make(chan error, 1)
-	o := &x11Overlay{reqs: make(chan clickReq, 1), quit: make(chan struct{}), probe: make(chan chan [2]int)}
+	o := &x11Overlay{reqs: make(chan clickReq, 1), quit: make(chan struct{}), done: make(chan struct{}), probe: make(chan chan [2]int)}
 	go o.loop(ready)
 	if err := <-ready; err != nil {
 		return nil, err
@@ -363,16 +366,19 @@ func (o *x11Overlay) send(r clickReq) {
 	}
 }
 
-// Close destroys the window and ends the goroutine.
+// Close destroys the window, ends the goroutine and waits for both, so no
+// half-destroyed overlay window or connection outlives the call.
 func (o *x11Overlay) Close() {
 	select {
 	case <-o.quit:
 	default:
 		close(o.quit)
 	}
+	<-o.done
 }
 
 func (o *x11Overlay) loop(ready chan<- error) {
+	defer close(o.done)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	ov := C.csOverlayOpen()

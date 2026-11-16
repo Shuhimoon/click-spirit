@@ -3,7 +3,7 @@
 package platform
 
 /*
-#cgo pkg-config: x11 xext xft xtst
+#cgo pkg-config: x11 xext xft xtst fontconfig
 #cgo LDFLAGS: -lm
 #include <math.h>
 #include <poll.h>
@@ -17,6 +17,7 @@ package platform
 #include <X11/keysym.h>
 #include <X11/cursorfont.h>
 #include <X11/Xft/Xft.h>
+#include "x11_common.h"
 #include <X11/extensions/XTest.h>
 
 // The picker grabs a screenshot of the root window, covers the whole root
@@ -188,8 +189,9 @@ static int csPickRun(int circle, int timeoutMs, int *out) {
 	csPicker *p = &pk;
 	memset(p, 0, sizeof pk);
 	p->circle = circle;
-	p->dpy = XOpenDisplay(NULL);
+	p->dpy = csXOpen();
 	if (p->dpy == NULL) return -1;
+	csXftNoFontCache(p->dpy);
 	Display *d = p->dpy;
 	p->screen = DefaultScreen(d);
 	p->root = RootWindow(d, p->screen);
@@ -309,7 +311,7 @@ static int csPickRun(int circle, int timeoutMs, int *out) {
 }
 
 static void pkScreenSize(int *w, int *h) {
-	Display *d = XOpenDisplay(NULL);
+	Display *d = csXOpen();
 	*w = 0; *h = 0;
 	if (d == NULL) return;
 	*w = DisplayWidth(d, DefaultScreen(d));
@@ -319,7 +321,7 @@ static void pkScreenSize(int *w, int *h) {
 
 // Test helpers: drive the picker through XTest on the private test display.
 static int pkFake(int kind, int a, int b) {
-	Display *d = XOpenDisplay(NULL);
+	Display *d = csXOpen();
 	if (d == NULL) return -1;
 	switch (kind) {
 	case 0: XTestFakeMotionEvent(d, -1, a, b, 0); break;
@@ -337,7 +339,7 @@ static int pkFake(int kind, int a, int b) {
 }
 
 static int pkMapped(void) {
-	Display *d = XOpenDisplay(NULL);
+	Display *d = csXOpen();
 	if (d == NULL) return -1;
 	Window root = DefaultRootWindow(d), r, parent, *kids = NULL;
 	unsigned int n = 0;

@@ -3,7 +3,7 @@
 package platform
 
 /*
-#cgo pkg-config: x11 xext xft
+#cgo pkg-config: x11 xext xft fontconfig
 #include <poll.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +12,7 @@ package platform
 #include <X11/Xatom.h>
 #include <X11/extensions/shape.h>
 #include <X11/Xft/Xft.h>
+#include "x11_common.h"
 
 // 小浮窗: a small override-redirect window that stays above other windows.
 // Collapsed it is a 56 px round button; tapping it expands a pill with three
@@ -48,8 +49,9 @@ static unsigned long bbRGB(csBubble *b, int r, int g, int bl) {
 
 static csBubble *bbOpen(void) {
 	int ev, er;
-	Display *d = XOpenDisplay(NULL);
+	Display *d = csXOpen();
 	if (d == NULL) return NULL;
+	csXftNoFontCache(d);
 	if (!XShapeQueryExtension(d, &ev, &er)) { XCloseDisplay(d); return NULL; }
 	csBubble *b = calloc(1, sizeof *b);
 	b->dpy = d;
@@ -289,6 +291,7 @@ type bubbleReq struct {
 type x11Bubble struct {
 	reqs chan bubbleReq
 	quit chan struct{}
+	done chan struct{} // closed after the window and connection are gone
 
 	mu       sync.Mutex
 	rect     core.Rect
@@ -303,7 +306,7 @@ func NewBubble() (core.Bubble, error) {
 	if Name() != "x11" {
 		return nil, errors.New("floating bubble needs the X11 backend: " + ErrUnsupported.Error())
 	}
-	b := &x11Bubble{reqs: make(chan bubbleReq, 8), quit: make(chan struct{})}
+	b := &x11Bubble{reqs: make(chan bubbleReq, 8), quit: make(chan struct{}), done: make(chan struct{})}
 	ready := make(chan error, 1)
 	go b.loop(ready)
 	if err := <-ready; err != nil {
@@ -333,13 +336,14 @@ func (b *x11Bubble) Rect() (core.Rect, bool) {
 	return b.rect, b.visible
 }
 
-// Close destroys the window.
+// Close destroys the window and waits until it and the connection are gone.
 func (b *x11Bubble) Close() {
 	select {
 	case <-b.quit:
 	default:
 		close(b.quit)
 	}
+	<-b.done
 }
 
 func (b *x11Bubble) publish(cb *C.csBubble) {
@@ -352,6 +356,7 @@ func (b *x11Bubble) publish(cb *C.csBubble) {
 }
 
 func (b *x11Bubble) loop(ready chan<- error) {
+	defer close(b.done)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	cb := C.bbOpen()
